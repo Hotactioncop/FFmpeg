@@ -51,6 +51,7 @@
 
 #define PTS_PROP L"PtsProp"
 
+/*
 const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
@@ -78,7 +79,8 @@ static const FormatMap format_map[] =
     { AV_PIX_FMT_YUV420P,    AMF_SURFACE_YUV420P },
     { AV_PIX_FMT_YUYV422,    AMF_SURFACE_YUY2 },
 };
-
+*/
+/*
 static enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
 {
     int i;
@@ -89,7 +91,7 @@ static enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
     }
     return AMF_SURFACE_UNKNOWN;
 }
-
+*/
 static void AMF_CDECL_CALL AMFTraceWriter_Write(AMFTraceWriter *pThis,
     const wchar_t *scope, const wchar_t *message)
 {

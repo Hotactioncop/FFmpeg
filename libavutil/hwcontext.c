@@ -63,6 +63,9 @@ static const HWContextType * const hw_table[] = {
 #if CONFIG_VULKAN
     &ff_hwcontext_type_vulkan,
 #endif
+#if CONFIG_AMF
+    &ff_hwcontext_type_amf,
+#endif
     NULL,
 };
 
