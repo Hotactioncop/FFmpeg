@@ -61,7 +61,7 @@ typedef struct AMFLibraryContext {
     const AVClass      *avclass;
 } AMFLibraryContext;
 
-static AMFLibraryContext amflib_context = 
+static AMFLibraryContext amflib_context =
 {
     .avclass = &amflib_class,
 };
@@ -88,7 +88,7 @@ static const AMFTraceWriterVtbl tracer_vtbl =
     .Flush = AMFTraceWriter_Flush,
 };
 
-static const AmfTraceWriter amf_trace_writer = 
+static const AmfTraceWriter amf_trace_writer =
 {
     .vtbl = &tracer_vtbl,
     .avcl = &amflib_context,
@@ -139,9 +139,9 @@ static int amf_init_device_ctx_object(AVHWDeviceContext *ctx)
     res = hwctx->factory->pVtbl->GetDebug(hwctx->factory, &priv->debug);
     AMFAV_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetDebug() failed with error %d\n", res);
 
-    priv->trace->pVtbl->EnableWriter(priv->trace, AMF_TRACE_WRITER_CONSOLE, 0);
+    priv->trace->pVtbl->EnableWriter(priv->trace, AMF_TRACE_WRITER_CONSOLE, TRUE);
     priv->trace->pVtbl->SetGlobalLevel(priv->trace, AMF_TRACE_TRACE);
-
+    priv->debug->pVtbl->AssertsEnable(priv->debug, TRUE);
     // connect AMF logger to av_log
     priv->trace->pVtbl->RegisterWriter(priv->trace, AMFAV_WRITER_ID, (AMFTraceWriter*)&amf_trace_writer, 1);
     priv->trace->pVtbl->SetWriterLevel(priv->trace, AMFAV_WRITER_ID, AMF_TRACE_TRACE);
@@ -179,6 +179,7 @@ static int amf_device_create(AVHWDeviceContext *ctx, const char *device,
 
 static int amf_device_derive(AVHWDeviceContext *dst_ctx,
                                 AVHWDeviceContext *src_ctx,
+                                AVDictionary *opts,
                                 int flags)
 {
     AVAMFDeviceContext *amf_ctx = dst_ctx->hwctx;
@@ -191,7 +192,7 @@ static int amf_device_derive(AVHWDeviceContext *dst_ctx,
 
     switch (src_ctx->type) {
 
-#if CONFIG_D3D11VA
+#if CONFIG_DXVA2
     case AV_HWDEVICE_TYPE_DXVA2:
         {
             AVDXVA2DeviceContext *dxva2_ctx = src_ctx->hwctx;

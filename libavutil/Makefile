@@ -50,6 +50,7 @@ HEADERS = adler32.h                                                     \
           hwcontext_videotoolbox.h                                      \
           hwcontext_vdpau.h                                             \
           hwcontext_vulkan.h                                            \
+          hwcontext_amf.h                                               \
           imgutils.h                                                    \
           intfloat.h                                                    \
           intreadwrite.h                                                \

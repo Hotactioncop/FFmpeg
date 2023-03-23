@@ -19,44 +19,28 @@
 #ifndef AVCODEC_AMFENC_H
 #define AVCODEC_AMFENC_H
 
-#include <AMF/core/Factory.h>
-
 #include <AMF/components/VideoEncoderVCE.h>
 #include <AMF/components/VideoEncoderHEVC.h>
 #include <AMF/components/VideoEncoderAV1.h>
 
 #include "libavutil/fifo.h"
+#include "libavutil/hwcontext_amf.h"
 
 #include "avcodec.h"
 #include "hwconfig.h"
 #include "amf.h"
 
 /**
-* AMF trace writer callback class
-* Used to capture all AMF logging
-*/
-
-typedef struct AmfTraceWriter {
-    AMFTraceWriterVtbl *vtbl;
-    AVCodecContext     *avctx;
-} AmfTraceWriter;
-
-/**
 * AMF encoder context
 */
 
-typedef struct AmfContext {
+typedef struct AvAmfEncoderContext {
     AVClass            *avclass;
     // access to AMF runtime
-    amf_handle          library; ///< handle to DLL library
-    AMFFactory         *factory; ///< pointer to AMF factory
-    AMFDebug           *debug;   ///< pointer to AMF debug interface
-    AMFTrace           *trace;   ///< pointer to AMF trace interface
-
-    amf_uint64          version; ///< version of AMF runtime
-    AmfTraceWriter      tracer;  ///< AMF writer registered with AMF
     AMFContext         *context; ///< AMF context
-    //encoder
+    AMFFactory         *factory;
+    AVBufferRef        *amf_device_ctx;
+
     AMFComponent       *encoder; ///< AMF encoder object
     amf_bool            eof;     ///< flag indicating EOF happened
     AMF_SURFACE_FORMAT  format;  ///< AMF surface format
@@ -122,9 +106,9 @@ typedef struct AmfContext {
 
     enum AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE_ENUM                 align;
 
-} AmfContext;
+} AvAmfEncoderContext;
 
-extern const AVCodecHWConfigInternal *const ff_amfenc_hw_configs[];
+//extern const AVCodecHWConfigInternal *const ff_amfenc_hw_configs[];
 
 /**
 * Common encoder initization function

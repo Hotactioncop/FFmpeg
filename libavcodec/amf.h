@@ -2,6 +2,7 @@
 #define AV_AMF_H
 #include <AMF/core/Surface.h>
 #include "libavformat/avformat.h"
+#include "hwconfig.h"
 
 /**
 * Error handling helper
@@ -34,5 +35,7 @@ enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt);
 * Supported formats
 */
 extern const enum AVPixelFormat ff_amf_pix_fmts[];
+
+extern const AVCodecHWConfigInternal *const ff_amfenc_hw_configs[];
 
 #endif // AV_AMF_H
