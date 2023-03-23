@@ -9,6 +9,30 @@
 
 #define propNotFound 0
 
+#ifdef _WIN32
+#include "compat/w32dlfcn.h"
+#else
+#include <dlfcn.h>
+#endif
+#define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
+
+static void AMF_CDECL_CALL AMFTraceWriter_Write(AMFTraceWriter *pThis,
+    const wchar_t *scope, const wchar_t *message)
+{
+    AmfTraceWriter *tracer = (AmfTraceWriter*)pThis;
+    av_log(tracer->avctx, AV_LOG_DEBUG, "%ls: %ls", scope, message); // \n is provided from AMF
+}
+
+static void AMF_CDECL_CALL AMFTraceWriter_Flush(AMFTraceWriter *pThis)
+{
+}
+
+static AMFTraceWriterVtbl tracer_vtbl =
+{
+    .Write = AMFTraceWriter_Write,
+    .Flush = AMFTraceWriter_Flush,
+};
+
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AMFSurface *surface = (AMFSurface*)(opaque);
@@ -20,10 +44,11 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AvAmfDecoderContext        *ctx = avctx->priv_data;
     const wchar_t     *codec_id = NULL;
     AMF_RESULT         res;
+    AMFInit_Fn         init_fun;
+    AMFQueryVersion_Fn version_fun;
     enum AMF_SURFACE_FORMAT formatOut = AMF_SURFACE_NV12;
     AMFBuffer * buffer;
-    //enum AVPixelFormat pix_fmt = avctx->sw_pix_fmt;
-
+    enum AVPixelFormat pix_fmt = avctx->sw_pix_fmt;
     switch (avctx->codec->id) {
         case AV_CODEC_ID_H264:
             codec_id = AMFVideoDecoderUVD_H264_AVC;
@@ -72,14 +97,18 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
         ctx->hw_frames_ref = av_hwframe_ctx_alloc(ctx->hw_device_ref);
         if (!ctx->hw_frames_ref)
             return AVERROR(ENOMEM);
-    }
-    else
-    {
+    } else if (avctx->hw_device_ctx) {
+        ret = av_hwdevice_ctx_create_derived(&ctx->amf_device_ctx, AV_HWDEVICE_TYPE_AMF, avctx->hw_device_ctx, 0);
+        if (ret < 0)
+            return ret;
+        ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
+        if (!ctx->hw_device_ctx)
+            return AVERROR(ENOMEM);
+    } else {
         ret = av_hwdevice_ctx_create(&ctx->amf_device_ctx, AV_HWDEVICE_TYPE_AMF, NULL, NULL, 0);
         if (ret < 0)
             return ret;
     }
-
     amf_ctx = ((AVHWDeviceContext*)ctx->amf_device_ctx->data)->hwctx;
     ctx->context = amf_ctx->context;
     ctx->factory = amf_ctx->factory;
@@ -189,15 +218,20 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
             {
-                AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
-                frame->data[0] = plane0->pVtbl->GetNative(plane0);
-                frame->data[1] = (uint8_t*)(intptr_t)0;
-
+                //AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
+                av_log(avctx, AV_LOG_WARNING, "decoding frame\n");
+                for (i = 0; i < pSurface->pVtbl->GetPlanesCount(pSurface); i++)
+                {
+                    plane = pSurface->pVtbl->GetPlaneAt(pSurface, i);
+                    frame->data[i] = plane->pVtbl->GetNative(plane);
+                    frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
+                }
                 frame->buf[0] = av_buffer_create(NULL,
                                          0,
                                          amf_free_amfsurface,
                                          pSurface,
                                          AV_BUFFER_FLAG_READONLY);
+                frame->format = AV_PIX_FMT_D3D11;
                 pSurface->pVtbl->Acquire(pSurface);
             }
             break;
@@ -214,6 +248,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
                                          pSurface,
                                          AV_BUFFER_FLAG_READONLY);
                 pSurface->pVtbl->Acquire(pSurface);
+                frame->format = AV_PIX_FMT_DXVA2_VLD;
             }
             break;
     #endif
@@ -234,15 +269,15 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
+                frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
             }
         }
-
-//    for (i = 0; i < pSurface->pVtbl->GetPlanesCount(pSurface); i++)
-//    {
-//        frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
-//    }
-
-    frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
+    /*
+    for (i = 0; i < pSurface->pVtbl->GetPlanesCount(pSurface); i++)
+    {
+        frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
+    }
+    */
     frame->width  = avctx->width;
     frame->height = avctx->height;
 
@@ -254,8 +289,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:size", &var);
     frame->pkt_size = var.int64Value;
 
-    //surface->pVtbl->GetProperty(surface, L"FFMPEG:duration", &var);
-    //frame->pkt_duration = var.int64Value;
+    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
+    frame->pkt_duration = var.int64Value;
     frame->pkt_duration = pSurface->pVtbl->GetDuration(pSurface);
 
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:pos", &var);
@@ -265,7 +300,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
     return ret;
 }
 
-static int ff_amf_receive_frame(const AVCodecContext *avctx, AVFrame *frame)
+static AMF_RESULT ff_amf_receive_frame(const AVCodecContext *avctx, AVFrame *frame)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMF_RESULT  ret;
@@ -278,8 +313,7 @@ static int ff_amf_receive_frame(const AVCodecContext *avctx, AVFrame *frame)
 
     ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
     AMFAV_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, AVERROR_UNKNOWN, "QueryOutput() failed with error %d\n", ret);
-
-    AMFAV_GOTO_FAIL_IF_FALSE(avctx, data_out, AVERROR_UNKNOWN, "QueryOutput() return empty data %d\n", ret);
+    AMFAV_GOTO_FAIL_IF_FALSE(avctx, data_out, AMF_EOF, "QueryOutput() return empty data %d\n", ret);
 
     if (data_out)
     {
@@ -452,9 +486,10 @@ static int amf_decode_frame(AVCodecContext *avctx, void *data,
     while(1)
     {
         res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, buf);
-        if (res == AMF_OK)
+        av_usleep(10);
+        if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
-            break;
+            *got_frame = 0;
         }
         else if (res == AMF_INPUT_FULL || res == AMF_DECODER_NO_FREE_SURFACES)
         {
@@ -463,7 +498,11 @@ static int amf_decode_frame(AVCodecContext *avctx, void *data,
             {
                 AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
                 *got_frame = 1;
-                av_usleep(1);
+                break;
+            } else if (res == AMF_EOF)
+            {
+                //ctx->decoder->pVtbl->Drain(ctx->decoder);
+                break;
             }
         }
         else
@@ -471,7 +510,7 @@ static int amf_decode_frame(AVCodecContext *avctx, void *data,
             AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, 0, "SubmitInput to decoder failed");
         }
     }
-
+    ctx->decoder->pVtbl->Drain(ctx->decoder);
     return avpkt->size;
 }
 
@@ -509,7 +548,7 @@ FFCodec ff_h264_amf_decoder = {
     .p.priv_class     = &amf_decode_class,
     .init           = ff_amf_decode_init,
     FF_CODEC_DECODE_CB(amf_decode_frame),
-    //.flush          = amf_decode_flush,
+    .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
     .p.pix_fmts       = ff_amf_pix_fmts,
     //.bsfs           = "h264", //TODO: real vcalue
@@ -529,7 +568,7 @@ FFCodec ff_hevc_amf_decoder = {
     .p.priv_class     = &amf_decode_class,
     .init           = ff_amf_decode_init,
     FF_CODEC_DECODE_CB(amf_decode_frame),
-    //.flush          = amf_decode_flush,
+    .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
     .p.pix_fmts       = ff_amf_pix_fmts,
     //.bsfs           = "h264", //TODO: real vcalue

@@ -15,6 +15,11 @@
 #include "avcodec.h"
 #include <AMF/components/VideoDecoderUVD.h>
 
+typedef struct AmfTraceWriter {
+    AMFTraceWriterVtbl *vtbl;
+    AVCodecContext     *avctx;
+} AmfTraceWriter;
+
 /**
 * AMF encoder context
 */
@@ -25,7 +30,12 @@ typedef struct AvAmfDecoderContext {
     AMFContext         *context;
     AMFFactory         *factory;
     AVBufferRef        *amf_device_ctx;
+    amf_handle          library; ///< handle to DLL library
+    AMFDebug           *debug;   ///< pointer to AMF debug interface
+    AMFTrace           *trace;   ///< pointer to AMF trace interface
 
+    amf_uint64          version; ///< version of AMF runtime
+    AmfTraceWriter      tracer;  ///< AMF writer registered with AMF
     //encoder
     AMFComponent       *decoder; ///< AMF decoder object
     AMF_SURFACE_FORMAT  format;  ///< AMF surface format
