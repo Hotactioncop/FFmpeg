@@ -185,7 +185,6 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext1 *context1 = NULL;
     int ret;
-    int err;
 
     // configure AMF logger
     // the return of these functions indicates old state and do not affect behaviour
@@ -315,7 +314,6 @@ static int ff_amf_decode_close(AVCodecContext *avctx)
 
     ctx->factory = NULL;
     ctx->context = NULL;
-    av_fifo_freep(&ctx->timestamp_list);
 
     av_buffer_unref(&ctx->amf_device_ctx);
 
@@ -338,24 +336,19 @@ static int ff_amf_decode_init(AVCodecContext *avctx)
     return ret;
 }
 
-static void dumpAvFrame(char * path, const AVFrame *frame)
+static void dumpAvFrame(const char * path, const AVFrame *frame)
 {
     FILE *fp;
     fp = fopen(path, "ab");
     if(!fp)
        return;
     fprintf(fp,"{\n");
-    fprintf(fp, "    \"best_effort_timestamp\": %d,\n", frame->best_effort_timestamp);
-    fprintf(fp, "    \"best_effort_timestamp\": %d,\n", frame->best_effort_timestamp);
-    fprintf(fp, "    \"channel_layout\": %d,\n", (int)frame->channel_layout);
-    fprintf(fp, "    \"channels\": %d,\n", frame->channels);
-    fprintf(fp, "    \"coded_picture_number\": %d,\n", frame->coded_picture_number);
+    fprintf(fp, "    \"best_effort_timestamp\": %lld,\n", frame->best_effort_timestamp);
     fprintf(fp, "    \"crop_bottom\": %d,\n", (int)frame->crop_bottom);
     fprintf(fp, "    \"crop_left\": %d,\n", (int)frame->crop_left);
     fprintf(fp, "    \"crop_right\": %d,\n", (int)frame->crop_right);
     fprintf(fp, "    \"crop_top\": %d,\n", (int)frame->crop_top);
     fprintf(fp, "    \"decode_error_flags\": %d,\n", frame->decode_error_flags);
-    fprintf(fp, "    \"display_picture_number\": %d,\n", frame->display_picture_number);
     fprintf(fp, "    \"flags\": %d,\n", frame->flags);
     fprintf(fp, "    \"format\": %d,\n", frame->format);
     fprintf(fp, "    \"height\": %d,\n", frame->height);
@@ -366,13 +359,16 @@ static void dumpAvFrame(char * path, const AVFrame *frame)
     fprintf(fp, "    \"nb_side_data\": %d,\n", frame->nb_side_data);
     fprintf(fp, "    \"palette_has_changed\": %d,\n", frame->palette_has_changed);
     fprintf(fp, "    \"pict_type\": %d,\n", (int)frame->pict_type);
-    fprintf(fp, "    \"pkt_dts\": %d,\n", frame->pkt_dts);
-    fprintf(fp, "    \"pkt_duration\": %d,\n", frame->pkt_duration);
-    fprintf(fp, "    \"pkt_pos\": %d,\n", frame->pkt_pos);
+    fprintf(fp, "    \"pkt_dts\": %lld,\n", frame->pkt_dts);
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
+    fprintf(fp, "    \"pkt_duration\": %lld,\n", frame->pkt_duration);
+    fprintf(fp, "    \"pkt_pos\": %lld,\n", frame->pkt_pos);
     fprintf(fp, "    \"pkt_size\": %d,\n", frame->pkt_size);
-    fprintf(fp, "    \"pts\": %d,\n", frame->pts);
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    fprintf(fp, "    \"pts\": %lld,\n", frame->pts);
     fprintf(fp, "    \"quality\": %d,\n", frame->quality);
-    fprintf(fp, "    \"reordered_opaque\": %d,\n", frame->reordered_opaque);
     fprintf(fp, "    \"repeat_pict\": %d,\n", frame->repeat_pict);
     fprintf(fp, "    \"sample_rate\": %d,\n", frame->sample_rate);
     fprintf(fp, "    \"top_field_first\": %d,\n", frame->top_field_first);
@@ -389,7 +385,7 @@ static void dumpAvFrame(char * path, const AVFrame *frame)
     fclose(fp);
 }
 
-static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pSurface, AVFrame *frame)
+static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface, AVFrame *frame)
 {
     AMFPlane *plane;
     AMFVariantStruct var = {0};
@@ -435,7 +431,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
         default:
             {*/
                 ret = pSurface->pVtbl->Convert(pSurface, AMF_MEMORY_HOST);
-                AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, L"Convert(amf::AMF_MEMORY_HOST) failed with error %d\n");
+                AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
                 for (i = 0; i < pSurface->pVtbl->GetPlanesCount(pSurface); i++)
                 {
@@ -465,22 +461,23 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, const AMFSurface* pS
 
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
-
+#if FF_API_FRAME_PKT
+FF_DISABLE_DEPRECATION_WARNINGS
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:size", &var);
     frame->pkt_size = var.int64Value;
-
-    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
-    frame->pkt_duration = var.int64Value;
-    frame->pkt_duration = pSurface->pVtbl->GetDuration(pSurface);
-
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:pos", &var);
     frame->pkt_pos = var.int64Value;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
+    //pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
+    //frame->duration = var.int64Value;
+    //frame->duration = pSurface->pVtbl->GetDuration(pSurface);
 
     dumpAvFrame("./amfdec.json", frame);
     return ret;
 }
 
-static AMF_RESULT ff_amf_receive_frame(const AVCodecContext *avctx, AVFrame *frame)
+static AMF_RESULT ff_amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMF_RESULT  ret;
@@ -510,7 +507,7 @@ static AMF_RESULT ff_amf_receive_frame(const AVCodecContext *avctx, AVFrame *fra
 
     data = av_frame_alloc();
     ret = amf_amfsurface_to_avframe(avctx, surface, data);
-    AMFAV_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, AVERROR_UNKNOWN, "Failed to convert AMFSurface to AVFrame", ret);
+    AMFAV_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, AVERROR_UNKNOWN, "Failed to convert AMFSurface to AVFrame");
 
     av_frame_move_ref(frame, data);
 fail:
@@ -543,11 +540,14 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext *ctxt = ctx->context;
     AMF_RESULT res;
+    amf_int64 pts = 0;
+    int m_ptsInitialMinPosition = propNotFound;
+    int64_t vst = propNotFound;//avctx->vst
+    int condition1 = propNotFound;//(m_iVideoStreamIndex == -1 || pPacket->stream_index == m_iVideoStreamIndex) && m_ptsSeekPos != -1
 
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "UpdateBufferProperties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "UpdateBufferProperties() - packet not passed in");
-
-    const amf_int64  pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
+    pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
     pBuffer->pVtbl->SetPts(pBuffer, pts);// - GetMinPosition());
     if (pPacket != NULL)
     {
@@ -561,10 +561,8 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pos", pPacket->pos);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:duration", pPacket->duration);
     }
-    int m_ptsInitialMinPosition = propNotFound;
     AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:FirstPtsOffset", m_ptsInitialMinPosition);
 
-    int vst = propNotFound;//avctx->vst
     if (vst != AV_NOPTS_VALUE)
     {
         int start_time = propNotFound;
@@ -574,21 +572,19 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
     AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, L"FFMPEG:time_base_den", avctx->time_base.den);
     AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, L"FFMPEG:time_base_num", avctx->time_base.num);
 
-    int condition1 = propNotFound;//(m_iVideoStreamIndex == -1 || pPacket->stream_index == m_iVideoStreamIndex) && m_ptsSeekPos != -1
     if (condition1)
     {
         int m_ptsSeekPos = propNotFound;
+        int m_ptsPosition = propNotFound;
         if (pts < m_ptsSeekPos)
         {
             AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"Seeking", true);
         }
-        int m_ptsPosition = propNotFound;
         if (m_ptsSeekPos <= m_ptsPosition)
         {
-            AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"EndSeeking", true);
-
             AVFormatContext * m_pInputContext = propNotFound;
             int default_stream_index = av_find_default_stream_index(m_pInputContext);
+            AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"EndSeeking", true);
             if (pPacket->stream_index == default_stream_index)
             {
                 m_ptsSeekPos = -1;
@@ -606,7 +602,7 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
     update_buffer_video_duration(avctx, pBuffer, pPacket);
 
     AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, FFMPEG_DEMUXER_BUFFER_STREAM_INDEX, pPacket->stream_index);
-    AMF_RETURN_IF_FALSE(res == AMF_OK, ctxt, res, L"Failed to set property");
+    AMF_RETURN_IF_FALSE(ctxt, res == AMF_OK, res, "Failed to set property");
     return AMF_OK;
 }
 
@@ -616,9 +612,10 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     AMFContext *ctxt = ctx->context;
     void *pMem;
     AMF_RESULT err;
+    AMFBuffer* pBuffer = NULL;
 
-    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, L"BufferFromPacket() - packet not passed in");
-    AMF_RETURN_IF_FALSE(ctxt, ppBuffer != NULL, AMF_INVALID_ARG, L"BufferFromPacket() - buffer pointer not passed in");
+    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "BufferFromPacket() - packet not passed in");
+    AMF_RETURN_IF_FALSE(ctxt, ppBuffer != NULL, AMF_INVALID_ARG, "BufferFromPacket() - buffer pointer not passed in");
 
 
     // Reproduce FFMPEG packet allocate logic (file libavcodec/avpacket.c function av_packet_duplicate)
@@ -627,12 +624,10 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     // ...
     //MM this causes problems because there is no way to set real buffer size. Allocation has 32 byte alignment - should be enough.
     err = ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, pPacket->size + AV_INPUT_BUFFER_PADDING_SIZE, ppBuffer);
-    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, L"BufferFromPacket() - AllocBuffer failed");
-
-    AMFBuffer* pBuffer = *ppBuffer;
+    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "BufferFromPacket() - AllocBuffer failed");
+    pBuffer = *ppBuffer;
     err = pBuffer->pVtbl->SetSize(pBuffer, pPacket->size);
-    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, L"BufferFromPacket() - SetSize failed");
-
+    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "BufferFromPacket() - SetSize failed");
     // get the memory location and check the buffer was indeed allocated
     pMem = pBuffer->pVtbl->GetNative(pBuffer);
     AMF_RETURN_IF_FALSE(ctxt, pMem != NULL, AMF_INVALID_POINTER, "BufferFromPacket() - GetMemory failed");
@@ -647,7 +642,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     return amf_update_buffer_properties(avctx, pBuffer, pPacket);
 }
 
-static int amf_decode_frame(AVCodecContext *avctx, void *data,
+static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
                        int *got_frame, AVPacket *avpkt)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
@@ -671,7 +666,7 @@ static int amf_decode_frame(AVCodecContext *avctx, void *data,
 
     while(1)
     {
-        res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, buf);
+        res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, (AMFData*) buf);
         av_usleep(10);
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
@@ -701,9 +696,8 @@ static int amf_decode_frame(AVCodecContext *avctx, void *data,
 
 static void amf_decode_flush(AVCodecContext *avctx)
 {
-    AMF_RESULT res = AMF_OK;
     AvAmfDecoderContext *ctx = avctx->priv_data;
-    res = ctx->decoder->pVtbl->Flush(ctx->decoder);
+    ctx->decoder->pVtbl->Flush(ctx->decoder);
 }
 
 #define OFFSET(x) offsetof(AvAmfDecoderContext, x)
