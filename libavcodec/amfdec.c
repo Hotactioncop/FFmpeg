@@ -293,9 +293,6 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
         }
     }
 
-    //ctx->context = amf_ctx->context;
-    //ctx->factory = amf_ctx->factory;
-
     return ret;
 }
 
@@ -395,13 +392,14 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    /*switch (pSurface->pVtbl->GetMemoryType(pSurface))
+    switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
             {
                 AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
                 frame->data[0] = plane0->pVtbl->GetNative(plane0);
+                frame->linesize[0] = plane0->pVtbl->GetHPitch(plane0);
                 frame->data[1] = (uint8_t*)(intptr_t)0;
 
                 frame->buf[0] = av_buffer_create(NULL,
@@ -429,7 +427,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
             break;
     #endif
         default:
-            {*/
+            {
                 ret = pSurface->pVtbl->Convert(pSurface, AMF_MEMORY_HOST);
                 AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
@@ -445,13 +443,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
-         //   }
-        //}
-
-//    for (i = 0; i < pSurface->pVtbl->GetPlanesCount(pSurface); i++)
-//    {
-//        frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
-//    }
+            }
+        }
 
     frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
     frame->width  = avctx->width;
@@ -667,7 +660,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     while(1)
     {
         res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, (AMFData*) buf);
-        av_usleep(10);
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
             *got_frame = 0;
@@ -679,7 +671,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
             {
                 AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
                 *got_frame = 1;
-                break;
             } else if (res == AMF_EOF)
             {
                 break;
@@ -734,7 +725,7 @@ FFCodec ff_h264_amf_decoder = {
     .p.capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | //TODO: real vcalue
                       AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name   = "amf",
-    //.hw_configs     = ff_amfenc_hw_configs,
+    //.hw_configs     = ff_amfdec_hw_configs,
 };
 
 FFCodec ff_hevc_amf_decoder = {
@@ -754,5 +745,5 @@ FFCodec ff_hevc_amf_decoder = {
     .p.capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | //TODO: real vcalue
                       AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name   = "amf",
-    //.hw_configs     = ff_amfenc_hw_configs,
+    //.hw_configs     = ff_amfdec_hw_configs,
 };
