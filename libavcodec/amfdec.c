@@ -81,9 +81,8 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AvAmfDecoderContext        *ctx = avctx->priv_data;
     const wchar_t     *codec_id = NULL;
     AMF_RESULT         res;
-    enum AMF_SURFACE_FORMAT formatOut = AMF_SURFACE_NV12;
+    enum AMF_SURFACE_FORMAT formatOut = amf_av_to_amf_format(avctx->pix_fmt);
     AMFBuffer * buffer;
-    //enum AVPixelFormat pix_fmt = avctx->sw_pix_fmt;
 
     switch (avctx->codec->id) {
         case AV_CODEC_ID_H264:
@@ -357,6 +356,7 @@ static void dumpAvFrame(const char * path, const AVFrame *frame)
     fprintf(fp, "    \"palette_has_changed\": %d,\n", frame->palette_has_changed);
     fprintf(fp, "    \"pict_type\": %d,\n", (int)frame->pict_type);
     fprintf(fp, "    \"pkt_dts\": %lld,\n", frame->pkt_dts);
+    fprintf(fp, "    \"duration\": %lld,\n", frame->duration);
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
     fprintf(fp, "    \"pkt_duration\": %lld,\n", frame->pkt_duration);
@@ -392,7 +392,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    switch (pSurface->pVtbl->GetMemoryType(pSurface))
+    /*switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
@@ -427,7 +427,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
             break;
     #endif
         default:
-            {
+            {*/
                 ret = pSurface->pVtbl->Convert(pSurface, AMF_MEMORY_HOST);
                 AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
@@ -443,8 +443,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
-            }
-        }
+            //}
+        //}
 
     frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
     frame->width  = avctx->width;
@@ -454,6 +454,11 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
 
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
+    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:pts", &var);
+    frame->pts = var.int64Value;
+    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
+    frame->duration = var.int64Value;
+
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:size", &var);
@@ -462,10 +467,6 @@ FF_DISABLE_DEPRECATION_WARNINGS
     frame->pkt_pos = var.int64Value;
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
-    //pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
-    //frame->duration = var.int64Value;
-    //frame->duration = pSurface->pVtbl->GetDuration(pSurface);
-
     dumpAvFrame("./amfdec.json", frame);
     return ret;
 }
@@ -481,15 +482,18 @@ static AMF_RESULT ff_amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     if (!ctx->decoder)
         return AVERROR(EINVAL);
 
-    ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
+    do {
+        data_out = NULL;
+        ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
+    } while (ret == AMF_REPEAT);
 
-    AMFAV_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, ret, "QueryOutput() failed with error %d\n", ret);
-
-    if (data_out == NULL)
+    if (data_out == NULL || ret == AMF_EOF)
     {
         av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned empty data\n");
         return AMF_EOF;
     }
+
+    AMFAV_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, ret, "QueryOutput() failed with error %d\n", ret);
 
     if (data_out)
     {
@@ -548,11 +552,9 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pts", pPacket->pts);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:dts", pPacket->dts);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:stream_index", pPacket->stream_index);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:flags", pPacket->flags);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:duration", pPacket->duration);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:size", pPacket->size);
         AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pos", pPacket->pos);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:duration", pPacket->duration);
     }
     AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:FirstPtsOffset", m_ptsInitialMinPosition);
 
@@ -646,11 +648,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
 
     if (!avpkt->size)
     {
-        res = ff_amf_receive_frame(avctx, frame);
-        if (res == AMF_OK)
-        {
-            *got_frame = 1;
-        }
         return 0;
     }
 
@@ -671,6 +668,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
             {
                 AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
                 *got_frame = 1;
+                break;
             } else if (res == AMF_EOF)
             {
                 break;
@@ -681,7 +679,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
             AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, 0, "SubmitInput to decoder failed");
         }
     }
-    //ctx->decoder->pVtbl->Drain(ctx->decoder);
+    ctx->decoder->pVtbl->Drain(ctx->decoder);
     return avpkt->size;
 }
 
