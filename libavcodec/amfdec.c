@@ -5,6 +5,7 @@
 #include "libavutil/imgutils.h"
 #include "libavutil/time.h"
 #include "codec_internal.h"
+#include "hwconfig.h"
 #include "amf.h"
 
 #if CONFIG_D3D11VA
@@ -24,6 +25,22 @@
 #define propNotFound 0
 
 #define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
+
+/*
+FIXME: Uncomment when AMF hw_context is ready
+static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
+    &(const AVCodecHWConfigInternal) {
+        .public = {
+            .pix_fmt     = // TODO: replace to AV_PIX_FMT_AMF,
+            .methods     = AV_CODEC_HW_CONFIG_METHOD_HW_FRAMES_CTX |
+                           AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX,
+            .device_type = AV_HWDEVICE_TYPE_AMF,
+        },
+        .hwaccel = NULL,
+    },
+    NULL
+};
+*/
 
 static void AMF_CDECL_CALL AMFTraceWriter_Write(AMFTraceWriter *pThis,
     const wchar_t *scope, const wchar_t *message)
@@ -90,6 +107,9 @@ static int amf_init_decoder(AVCodecContext *avctx)
             break;
         case AV_CODEC_ID_HEVC:
             codec_id = AMFVideoDecoderHW_H265_HEVC;
+            break;
+        case AV_CODEC_ID_AV1:
+            codec_id = AMFVideoDecoderHW_AV1;
             break;
         default:
             break;
@@ -392,7 +412,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    /*switch (pSurface->pVtbl->GetMemoryType(pSurface))
+    switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
@@ -427,7 +447,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
             break;
     #endif
         default:
-            {*/
+            {
                 ret = pSurface->pVtbl->Convert(pSurface, AMF_MEMORY_HOST);
                 AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
@@ -443,8 +463,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
-            //}
-        //}
+            }
+        }
 
     frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
     frame->width  = avctx->width;
@@ -707,41 +727,57 @@ static const AVClass amf_decode_class = {
 };
 
 FFCodec ff_h264_amf_decoder = {
-    .p.name           = "h264_amf",
-//    .long_name      = NULL_IF_CONFIG_SMALL("AMD AMF decoder"),
-    .p.long_name      = "AMD AMF decoder",
-    .p.type           = AVMEDIA_TYPE_VIDEO,
-    .p.id             = AV_CODEC_ID_H264,
+    .p.name         = "h264_amf",
+    .p.long_name    = "AMD AMF decoder",
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_H264,
     .priv_data_size = sizeof(AvAmfDecoderContext),
-    .p.priv_class     = &amf_decode_class,
+    .p.priv_class   = &amf_decode_class,
     .init           = ff_amf_decode_init,
     FF_CODEC_DECODE_CB(amf_decode_frame),
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
-    .p.pix_fmts       = ff_amf_pix_fmts,
-    //.bsfs           = "h264", //TODO: real vcalue
-    .p.capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | //TODO: real vcalue
-                      AV_CODEC_CAP_AVOID_PROBING,
-    .p.wrapper_name   = "amf",
-    //.hw_configs     = ff_amfdec_hw_configs,
+    .p.pix_fmts     = ff_amf_pix_fmts,
+    .bsfs           = "h264_mp4toannexb",
+    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .p.wrapper_name = "amf",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
+    //.hw_configs     = amf_hw_configs,
 };
 
 FFCodec ff_hevc_amf_decoder = {
-    .p.name           = "hevc_amf",
-//    .long_name      = NULL_IF_CONFIG_SMALL("AMD AMF decoder"),
-    .p.long_name      = "AMD AMF decoder",
-    .p.type           = AVMEDIA_TYPE_VIDEO,
-    .p.id             = AV_CODEC_ID_HEVC,
+    .p.name         = "hevc_amf",
+    .p.long_name    = "AMD AMF decoder",
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_HEVC,
     .priv_data_size = sizeof(AvAmfDecoderContext),
-    .p.priv_class     = &amf_decode_class,
+    .p.priv_class   = &amf_decode_class,
     .init           = ff_amf_decode_init,
     FF_CODEC_DECODE_CB(amf_decode_frame),
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
-    .p.pix_fmts       = ff_amf_pix_fmts,
-    //.bsfs           = "h264", //TODO: real vcalue
-    .p.capabilities   = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | //TODO: real vcalue
-                      AV_CODEC_CAP_AVOID_PROBING,
-    .p.wrapper_name   = "amf",
-    //.hw_configs     = ff_amfdec_hw_configs,
+    .p.pix_fmts     = ff_amf_pix_fmts,
+    .bsfs           = "hevc_mp4toannexb",
+    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .p.wrapper_name = "amf",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
+    //.hw_configs     = amf_hw_configs,
+};
+
+FFCodec ff_av1_amf_decoder = {
+    .p.name         = "av1_amf",
+    .p.long_name    = "AMD AMF decoder",
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_AV1,
+    .priv_data_size = sizeof(AvAmfDecoderContext),
+    .p.priv_class   = &amf_decode_class,
+    .init           = ff_amf_decode_init,
+    FF_CODEC_DECODE_CB(amf_decode_frame),
+    .flush          = amf_decode_flush,
+    .close          = ff_amf_decode_close,
+    .p.pix_fmts     = ff_amf_pix_fmts,
+    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
+    .p.wrapper_name = "amf",
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
+    //.hw_configs     = amf_hw_configs,
 };
