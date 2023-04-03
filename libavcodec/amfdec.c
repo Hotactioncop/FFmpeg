@@ -739,7 +739,6 @@ FFCodec ff_hevc_amf_decoder = {
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
     .p.pix_fmts     = ff_amf_dec_pix_fmts,
-    .bsfs           = "hevc_mp4toannexb",
     .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name = "amf",
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
