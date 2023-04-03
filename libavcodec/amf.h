@@ -30,9 +30,4 @@ extern const FormatMap format_map[];
 enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt);
 enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt);
 
-/**
-* Supported formats
-*/
-extern const enum AVPixelFormat ff_amf_pix_fmts[];
-
 #endif // AV_AMF_H

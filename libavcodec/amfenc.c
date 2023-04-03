@@ -51,7 +51,7 @@
 
 #define PTS_PROP L"PtsProp"
 
-/*
+
 const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
@@ -63,7 +63,7 @@ const enum AVPixelFormat ff_amf_pix_fmts[] = {
 #endif
     AV_PIX_FMT_NONE
 };
-
+/*
 typedef struct FormatMap {
     enum AVPixelFormat       av_format;
     enum AMF_SURFACE_FORMAT  amf_format;
