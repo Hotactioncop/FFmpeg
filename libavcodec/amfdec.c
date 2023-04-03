@@ -708,57 +708,32 @@ static const AVClass amf_decode_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-FFCodec ff_h264_amf_decoder = {
-    .p.name         = "h264_amf",
-    .p.long_name    = "AMD AMF decoder",
-    .p.type         = AVMEDIA_TYPE_VIDEO,
-    .p.id           = AV_CODEC_ID_H264,
-    .priv_data_size = sizeof(AvAmfDecoderContext),
-    .p.priv_class   = &amf_decode_class,
-    .init           = ff_amf_decode_init,
-    FF_CODEC_DECODE_CB(amf_decode_frame),
-    .flush          = amf_decode_flush,
-    .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_dec_pix_fmts,
-    .bsfs           = "h264_mp4toannexb",
-    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
-    .p.wrapper_name = "amf",
-    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
-    //.hw_configs     = amf_hw_configs,
-};
 
-FFCodec ff_hevc_amf_decoder = {
-    .p.name         = "hevc_amf",
-    .p.long_name    = "AMD AMF decoder",
-    .p.type         = AVMEDIA_TYPE_VIDEO,
-    .p.id           = AV_CODEC_ID_HEVC,
-    .priv_data_size = sizeof(AvAmfDecoderContext),
-    .p.priv_class   = &amf_decode_class,
-    .init           = ff_amf_decode_init,
-    FF_CODEC_DECODE_CB(amf_decode_frame),
-    .flush          = amf_decode_flush,
-    .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_dec_pix_fmts,
-    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
-    .p.wrapper_name = "amf",
-    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
-    //.hw_configs     = amf_hw_configs,
-};
+#define DEFINE_AMF_DECODER(x, X, bsf_name) \
+const FFCodec ff_##x##_amf_decoder = { \
+    .p.name         = #x "_amf", \
+    CODEC_LONG_NAME(#X " AMD AMF video decoder"), \
+    .priv_data_size = sizeof(AvAmfDecoderContext), \
+    .p.type         = AVMEDIA_TYPE_VIDEO, \
+    .p.id           = AV_CODEC_ID_##X, \
+    .init           = ff_amf_decode_init, \
+    FF_CODEC_DECODE_CB(amf_decode_frame), \
+    .flush          = amf_decode_flush, \
+    .close          = ff_amf_decode_close, \
+    .bsfs           = bsf_name, \
+    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING, \
+    .p.priv_class   = &amf_decode_class, \
+    .p.pix_fmts     = ff_amf_dec_pix_fmts, \
+    /*.hw_configs     = amf_hw_configs,*/ \
+    .p.wrapper_name = "amf", \
+    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE, \
+}; \
 
-FFCodec ff_av1_amf_decoder = {
-    .p.name         = "av1_amf",
-    .p.long_name    = "AMD AMF decoder",
-    .p.type         = AVMEDIA_TYPE_VIDEO,
-    .p.id           = AV_CODEC_ID_AV1,
-    .priv_data_size = sizeof(AvAmfDecoderContext),
-    .p.priv_class   = &amf_decode_class,
-    .init           = ff_amf_decode_init,
-    FF_CODEC_DECODE_CB(amf_decode_frame),
-    .flush          = amf_decode_flush,
-    .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_dec_pix_fmts,
-    .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
-    .p.wrapper_name = "amf",
-    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
-    //.hw_configs     = amf_hw_configs,
-};
+DEFINE_AMF_DECODER(h264, H264, "h264_mp4toannexb")
+DEFINE_AMF_DECODER(hevc, HEVC, NULL)
+DEFINE_AMF_DECODER(mpeg2, MPEG2VIDEO, NULL)
+DEFINE_AMF_DECODER(mpeg4, MPEG4, NULL)
+DEFINE_AMF_DECODER(vc1, VC1, NULL)
+DEFINE_AMF_DECODER(mjpeg, MJPEG, NULL)
+DEFINE_AMF_DECODER(vp9, VP9, NULL)
+DEFINE_AMF_DECODER(av1, AV1, NULL)
