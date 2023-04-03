@@ -26,6 +26,32 @@
 
 #define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
 
+const enum AVPixelFormat ff_amf_dec_pix_fmts[] = {
+    AV_PIX_FMT_NV12,
+    AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_NV12,
+    AV_PIX_FMT_BGRA,
+    AV_PIX_FMT_ARGB,
+    AV_PIX_FMT_RGBA,
+    AV_PIX_FMT_GRAY8,
+    AV_PIX_FMT_BGR0,
+    AV_PIX_FMT_YUYV422,
+    AV_PIX_FMT_P010,
+    AV_PIX_FMT_P012,
+    AV_PIX_FMT_YUV420P10,
+    AV_PIX_FMT_YUV420P12,
+    AV_PIX_FMT_YUV420P16,
+    AV_PIX_FMT_YUV422P10LE,
+    AV_PIX_FMT_YUV444P10LE,
+#if CONFIG_D3D11VA
+    AV_PIX_FMT_D3D11,
+#endif
+#if CONFIG_DXVA2
+    AV_PIX_FMT_DXVA2_VLD,
+#endif
+    AV_PIX_FMT_NONE
+};
+
 /*
 FIXME: Uncomment when AMF hw_context is ready
 static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
@@ -102,14 +128,38 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMFBuffer * buffer;
 
     switch (avctx->codec->id) {
+        case AV_CODEC_ID_MPEG2VIDEO:
+            codec_id = AMFVideoDecoderUVD_MPEG2;
+            break;
+        case AV_CODEC_ID_MPEG4:
+            codec_id = AMFVideoDecoderUVD_MPEG4;
+            break;
+        case AV_CODEC_ID_VC1:
+            codec_id = AMFVideoDecoderUVD_VC1;
+            break;
         case AV_CODEC_ID_H264:
             codec_id = AMFVideoDecoderUVD_H264_AVC;
             break;
-        case AV_CODEC_ID_HEVC:
-            codec_id = AMFVideoDecoderHW_H265_HEVC;
+        case AV_CODEC_ID_MJPEG:
+            codec_id = AMFVideoDecoderUVD_MJPEG;
             break;
+        case AV_CODEC_ID_HEVC: {
+            if (formatOut == AMF_SURFACE_P010)
+                codec_id = AMFVideoDecoderHW_H265_MAIN10;
+            else
+                codec_id = AMFVideoDecoderHW_H265_HEVC;
+        } break;
+        case AV_CODEC_ID_VP9: {
+            if (formatOut == AMF_SURFACE_P010)
+                codec_id = AMFVideoDecoderHW_VP9_10BIT;
+            else
+                codec_id = AMFVideoDecoderHW_VP9;
+        } break;
         case AV_CODEC_ID_AV1:
-            codec_id = AMFVideoDecoderHW_AV1;
+            if (formatOut == AMF_SURFACE_P012)
+                codec_id = AMFVideoDecoderHW_AV1_12BIT;
+            else
+                codec_id = AMFVideoDecoderHW_AV1;
             break;
         default:
             break;
@@ -669,7 +719,7 @@ FFCodec ff_h264_amf_decoder = {
     FF_CODEC_DECODE_CB(amf_decode_frame),
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_pix_fmts,
+    .p.pix_fmts     = ff_amf_dec_pix_fmts,
     .bsfs           = "h264_mp4toannexb",
     .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name = "amf",
@@ -688,7 +738,7 @@ FFCodec ff_hevc_amf_decoder = {
     FF_CODEC_DECODE_CB(amf_decode_frame),
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_pix_fmts,
+    .p.pix_fmts     = ff_amf_dec_pix_fmts,
     .bsfs           = "hevc_mp4toannexb",
     .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name = "amf",
@@ -707,7 +757,7 @@ FFCodec ff_av1_amf_decoder = {
     FF_CODEC_DECODE_CB(amf_decode_frame),
     .flush          = amf_decode_flush,
     .close          = ff_amf_decode_close,
-    .p.pix_fmts     = ff_amf_pix_fmts,
+    .p.pix_fmts     = ff_amf_dec_pix_fmts,
     .p.capabilities = AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING,
     .p.wrapper_name = "amf",
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE,
