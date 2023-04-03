@@ -412,7 +412,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    switch (pSurface->pVtbl->GetMemoryType(pSurface))
+    /*switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
@@ -447,7 +447,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
             break;
     #endif
         default:
-            {
+            {*/
                 ret = pSurface->pVtbl->Convert(pSurface, AMF_MEMORY_HOST);
                 AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
@@ -463,8 +463,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
-            }
-        }
+        //    }
+        //}
 
     frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
     frame->width  = avctx->width;
@@ -474,10 +474,6 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
 
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
-    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:pts", &var);
-    frame->pts = var.int64Value;
-    pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:duration", &var);
-    frame->duration = var.int64Value;
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -537,8 +533,19 @@ fail:
     return ret;
 }
 
-static void AMF_STD_CALL  update_buffer_video_duration(AVCodecContext *avctx, AMFBuffer* pBuffer, const AVPacket* pPacket)
+static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer* pBuffer, const AVPacket* pPacket)
 {
+    AvAmfDecoderContext *ctx = avctx->priv_data;
+    AMFContext *ctxt = ctx->context;
+    AMF_RESULT res;
+    amf_int64 pts = 0;
+    AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
+    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
+    pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
+    pBuffer->pVtbl->SetPts(pBuffer, pts);
+    AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:dts", pPacket->dts);
+    AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:size", pPacket->size);
+    AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pos", pPacket->pos);
     if (pPacket->duration != 0)
     {
         amf_int64 durationByFFMPEG    = av_rescale_q(pPacket->duration, avctx->time_base, AMF_TIME_BASE_Q);
@@ -547,77 +554,8 @@ static void AMF_STD_CALL  update_buffer_video_duration(AVCodecContext *avctx, AM
         {
             durationByFFMPEG = durationByFrameRate;
         }
-
         pBuffer->pVtbl->SetDuration(pBuffer, durationByFFMPEG);
     }
-}
-
-static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer* pBuffer, const AVPacket* pPacket)
-{
-    AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMFContext *ctxt = ctx->context;
-    AMF_RESULT res;
-    amf_int64 pts = 0;
-    int m_ptsInitialMinPosition = propNotFound;
-    int64_t vst = propNotFound;//avctx->vst
-    int condition1 = propNotFound;//(m_iVideoStreamIndex == -1 || pPacket->stream_index == m_iVideoStreamIndex) && m_ptsSeekPos != -1
-
-    AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "UpdateBufferProperties() - buffer not passed in");
-    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "UpdateBufferProperties() - packet not passed in");
-    pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
-    pBuffer->pVtbl->SetPts(pBuffer, pts);// - GetMinPosition());
-    if (pPacket != NULL)
-    {
-        //AMFVariantStruct var;
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pts", pPacket->pts);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:dts", pPacket->dts);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:stream_index", pPacket->stream_index);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:duration", pPacket->duration);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:size", pPacket->size);
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:pos", pPacket->pos);
-    }
-    AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:FirstPtsOffset", m_ptsInitialMinPosition);
-
-    if (vst != AV_NOPTS_VALUE)
-    {
-        int start_time = propNotFound;
-        AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:start_time", start_time);
-    }
-
-    AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, L"FFMPEG:time_base_den", avctx->time_base.den);
-    AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, L"FFMPEG:time_base_num", avctx->time_base.num);
-
-    if (condition1)
-    {
-        int m_ptsSeekPos = propNotFound;
-        int m_ptsPosition = propNotFound;
-        if (pts < m_ptsSeekPos)
-        {
-            AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"Seeking", true);
-        }
-        if (m_ptsSeekPos <= m_ptsPosition)
-        {
-            AVFormatContext * m_pInputContext = propNotFound;
-            int default_stream_index = av_find_default_stream_index(m_pInputContext);
-            AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"EndSeeking", true);
-            if (pPacket->stream_index == default_stream_index)
-            {
-                m_ptsSeekPos = -1;
-            }
-        }
-        else
-        {
-            if (pPacket->flags & AV_PKT_FLAG_KEY)
-            {
-                AMF_ASSIGN_PROPERTY_BOOL(res, pBuffer, L"BeginSeeking", true);
-            }
-        }
-    }
-    AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, FFMPEG_DEMUXER_BUFFER_TYPE, AMF_STREAM_VIDEO);
-    update_buffer_video_duration(avctx, pBuffer, pPacket);
-
-    AMF_ASSIGN_PROPERTY_DATA(res, Int64, pBuffer, FFMPEG_DEMUXER_BUFFER_STREAM_INDEX, pPacket->stream_index);
-    AMF_RETURN_IF_FALSE(ctxt, res == AMF_OK, res, "Failed to set property");
     return AMF_OK;
 }
 
@@ -629,23 +567,17 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     AMF_RESULT err;
     AMFBuffer* pBuffer = NULL;
 
-    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "BufferFromPacket() - packet not passed in");
-    AMF_RETURN_IF_FALSE(ctxt, ppBuffer != NULL, AMF_INVALID_ARG, "BufferFromPacket() - buffer pointer not passed in");
+    AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "amf_buffer_from_packet() - packet not passed in");
+    AMF_RETURN_IF_FALSE(ctxt, ppBuffer != NULL, AMF_INVALID_ARG, "amf_buffer_from_packet() - buffer pointer not passed in");
 
-
-    // Reproduce FFMPEG packet allocate logic (file libavcodec/avpacket.c function av_packet_duplicate)
-    // ...
-    //    data = av_malloc(pkt->size + FF_INPUT_BUFFER_PADDING_SIZE);
-    // ...
-    //MM this causes problems because there is no way to set real buffer size. Allocation has 32 byte alignment - should be enough.
     err = ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, pPacket->size + AV_INPUT_BUFFER_PADDING_SIZE, ppBuffer);
-    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "BufferFromPacket() - AllocBuffer failed");
+    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "amf_buffer_from_packet() - AllocBuffer failed");
     pBuffer = *ppBuffer;
     err = pBuffer->pVtbl->SetSize(pBuffer, pPacket->size);
-    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "BufferFromPacket() - SetSize failed");
+    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "amf_buffer_from_packet() - SetSize failed");
     // get the memory location and check the buffer was indeed allocated
     pMem = pBuffer->pVtbl->GetNative(pBuffer);
-    AMF_RETURN_IF_FALSE(ctxt, pMem != NULL, AMF_INVALID_POINTER, "BufferFromPacket() - GetMemory failed");
+    AMF_RETURN_IF_FALSE(ctxt, pMem != NULL, AMF_INVALID_POINTER, "amf_buffer_from_packet() - GetNative failed");
 
     // copy the packet memory and don't forget to
     // clear data padding like it is done by FFMPEG
