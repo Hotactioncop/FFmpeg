@@ -57,6 +57,8 @@ typedef struct AvAmfDecoderContext {
     // Static options, have to be set before Init() call
     int                 decoder_mode;
     int                 timestamp_mode;
+    int                 lowlatency;
+    int                 smart_access_video;
 
 } AvAmfDecoderContext;
 
