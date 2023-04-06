@@ -365,13 +365,25 @@ static int ff_amf_decode_close(AVCodecContext *avctx)
         ctx->decoder->pVtbl->Release(ctx->decoder);
         ctx->decoder = NULL;
     }
+    if (ctx->context) {
+        ctx->context->pVtbl->Terminate(ctx->context);
+        ctx->context->pVtbl->Release(ctx->context);
+        ctx->context = NULL;
+    }
 
     av_buffer_unref(&ctx->hw_device_ctx);
     av_buffer_unref(&ctx->hw_frames_ctx);
+        if (ctx->trace) {
+        ctx->trace->pVtbl->UnregisterWriter(ctx->trace, FFMPEG_AMF_WRITER_ID);
+    }
+    if (ctx->library) {
+        dlclose(ctx->library);
+        ctx->library = NULL;
+    }
 
+    ctx->trace = NULL;
+    ctx->debug = NULL;
     ctx->factory = NULL;
-    ctx->context = NULL;
-
     av_buffer_unref(&ctx->amf_device_ctx);
 
     return 0;
