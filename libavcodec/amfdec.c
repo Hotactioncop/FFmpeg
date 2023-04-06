@@ -128,32 +128,14 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMFBuffer * buffer;
 
     switch (avctx->codec->id) {
-        case AV_CODEC_ID_MPEG2VIDEO:
-            codec_id = AMFVideoDecoderUVD_MPEG2;
-            break;
-        case AV_CODEC_ID_MPEG4:
-            codec_id = AMFVideoDecoderUVD_MPEG4;
-            break;
-        case AV_CODEC_ID_VC1:
-            codec_id = AMFVideoDecoderUVD_VC1;
-            break;
         case AV_CODEC_ID_H264:
             codec_id = AMFVideoDecoderUVD_H264_AVC;
-            break;
-        case AV_CODEC_ID_MJPEG:
-            codec_id = AMFVideoDecoderUVD_MJPEG;
             break;
         case AV_CODEC_ID_HEVC: {
             if (formatOut == AMF_SURFACE_P010)
                 codec_id = AMFVideoDecoderHW_H265_MAIN10;
             else
                 codec_id = AMFVideoDecoderHW_H265_HEVC;
-        } break;
-        case AV_CODEC_ID_VP9: {
-            if (formatOut == AMF_SURFACE_P010)
-                codec_id = AMFVideoDecoderHW_VP9_10BIT;
-            else
-                codec_id = AMFVideoDecoderHW_VP9;
         } break;
         case AV_CODEC_ID_AV1:
             if (formatOut == AMF_SURFACE_P012)
@@ -757,9 +739,4 @@ const FFCodec ff_##x##_amf_decoder = { \
 
 DEFINE_AMF_DECODER(h264, H264, "h264_mp4toannexb")
 DEFINE_AMF_DECODER(hevc, HEVC, NULL)
-DEFINE_AMF_DECODER(mpeg2, MPEG2VIDEO, NULL)
-DEFINE_AMF_DECODER(mpeg4, MPEG4, NULL)
-DEFINE_AMF_DECODER(vc1, VC1, NULL)
-DEFINE_AMF_DECODER(mjpeg, MJPEG, NULL)
-DEFINE_AMF_DECODER(vp9, VP9, NULL)
 DEFINE_AMF_DECODER(av1, AV1, NULL)
