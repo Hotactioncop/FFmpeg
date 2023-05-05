@@ -528,6 +528,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
 
+    //frame->duration = pSurface->pVtbl->GetDuration(pSurface);
+
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
     pSurface->pVtbl->GetProperty(pSurface, L"FFMPEG:size", &var);
@@ -556,9 +558,14 @@ static AMF_RESULT ff_amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
     } while (ret == AMF_REPEAT);
 
-    if (data_out == NULL || ret == AMF_EOF)
+    if (data_out == NULL)
     {
         av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned empty data\n");
+        return AMF_FAIL;
+    }
+    if (ret == AMF_EOF)
+    {
+        av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned AMF_EOF\n");
         return AMF_EOF;
     }
 
@@ -594,7 +601,7 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
     amf_int64 pts = 0;
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
-    pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
+    pts = av_rescale_q(pPacket->pts, avctx->time_base, AMF_TIME_BASE_Q);
     pBuffer->pVtbl->SetPts(pBuffer, pts);
     AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:dts", pPacket->dts);
     AMF_ASSIGN_PROPERTY_INT64(res, pBuffer, L"FFMPEG:size", pPacket->size);
@@ -653,39 +660,43 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
 
     if (!avpkt->size)
     {
+        res = ff_amf_receive_frame(avctx, frame);
+        if (res == AMF_OK)
+        {
+            *got_frame = 1;
+        }
+        ctx->decoder->pVtbl->Drain(ctx->decoder);
         return 0;
     }
-
     res = amf_buffer_from_packet(avctx, avpkt, &buf);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, 0, "Cannot convert AVPacket to AMFbuffer");
 
-    while(1)
-    {
-        res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, (AMFData*) buf);
+    res = ctx->decoder->pVtbl->SubmitInput(ctx->decoder, (AMFData*) buf);
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
             *got_frame = 0;
+            //break;
         }
-        else if (res == AMF_INPUT_FULL || res == AMF_DECODER_NO_FREE_SURFACES)
-        {
+    while(1)
+    {
+        //else if (res == AMF_INPUT_FULL || res == AMF_DECODER_NO_FREE_SURFACES)
+        //{
             res = ff_amf_receive_frame(avctx, frame);
             if (res == AMF_OK)
             {
                 AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
                 *got_frame = 1;
-                break;
-            } else if (res == AMF_EOF)
-            {
+                //break;
+            } else {
                 break;
             }
-        }
-        else
+        //}
+        /*else
         {
             AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, 0, "SubmitInput to decoder failed");
-        }
+        }*/
     }
-    ctx->decoder->pVtbl->Drain(ctx->decoder);
-    return avpkt->size;
+     return avpkt->size;
 }
 
 static void amf_decode_flush(AVCodecContext *avctx)
@@ -699,7 +710,7 @@ static void amf_decode_flush(AVCodecContext *avctx)
 
 static const AVOption options[] = {
     // Decoder mode
-    { "decoder_mode",       "Decoder mode",                                                 OFFSET(decoder_mode),       AV_OPT_TYPE_INT,   { .i64 = AMF_VIDEO_DECODER_MODE_REGULAR      }, AMF_VIDEO_DECODER_MODE_REGULAR, AMF_VIDEO_DECODER_MODE_LOW_LATENCY, VD, "decoder_mode" },
+    { "decoder_mode",       "Decoder mode",                                                 OFFSET(decoder_mode),       AV_OPT_TYPE_INT,   { .i64 = AMF_VIDEO_DECODER_MODE_LOW_LATENCY  }, AMF_VIDEO_DECODER_MODE_REGULAR, AMF_VIDEO_DECODER_MODE_LOW_LATENCY, VD, "decoder_mode" },
     { "regular",            "DPB delay is based on number of reference frames + 1",         0,                          AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_DECODER_MODE_REGULAR      }, 0, 0, VD, "decoder_mode" },
     { "compliant",          "DPB delay is based on profile - up to 16",                     0,                          AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_DECODER_MODE_COMPLIANT    }, 0, 0, VD, "decoder_mode" },
     { "low_latency",        "DPB delay is 0",                                               0,                          AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_DECODER_MODE_LOW_LATENCY  }, 0, 0, VD, "decoder_mode" },
@@ -712,9 +723,9 @@ static const AVOption options[] = {
 
     // Reference frame management
     { "surface_pool_size",  "Number of surfaces in the decode pool",                        OFFSET(surface_pool_size),  AV_OPT_TYPE_INT,  { .i64 = 0 }, 0, INT_MAX, VD, NULL },
-    { "dpb_size",           "Minimum number of surfaces for reordering",                    OFFSET(dpb_size),           AV_OPT_TYPE_INT,  { .i64 = 0 }, 0, INT_MAX, VD, NULL },
+    { "dpb_size",           "Minimum number of surfaces for reordering",                    OFFSET(dpb_size),           AV_OPT_TYPE_INT,  { .i64 = 1 }, 0, 32, VD, NULL },
 
-    { "lowlatency",         "Low latency",                                                  OFFSET(lowlatency),         AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD, NULL },
+    { "lowlatency",         "Low latency",                                                  OFFSET(lowlatency),         AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VD, NULL },
     { "smart_access_video", "Smart Access Video",                                           OFFSET(smart_access_video), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD, NULL },
     { "skip_transfer_sav",  "Skip transfer on another GPU when SAV enabled",                OFFSET(skip_transfer_sav),  AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD, NULL },
 
