@@ -62,6 +62,7 @@ typedef struct AvAmfDecoderContext {
     int                 lowlatency;
     int                 smart_access_video;
     int                 skip_transfer_sav;
+    int                 drained;
 
 } AvAmfDecoderContext;
 
