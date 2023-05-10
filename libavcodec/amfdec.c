@@ -127,6 +127,8 @@ static int amf_init_decoder(AVCodecContext *avctx)
     enum AMF_SURFACE_FORMAT formatOut = amf_av_to_amf_format(avctx->pix_fmt);
     AMFBuffer * buffer;
     ctx->drained = 0;
+    if (formatOut == AMF_SURFACE_UNKNOWN)
+        formatOut = AMF_SURFACE_NV12;
 
     switch (avctx->codec->id) {
         case AV_CODEC_ID_H264:
