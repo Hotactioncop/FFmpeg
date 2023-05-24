@@ -159,13 +159,6 @@ static int amf_init_decoder(AVCodecContext *avctx)
     res = ctx->factory->pVtbl->CreateComponent(ctx->factory, ctx->context, codec_id, &ctx->decoder);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_ENCODER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", codec_id, res);
 
-    
-    if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
-        framerate = AMFConstructRate(avctx->framerate.num, avctx->framerate.den);
-    } else {
-        framerate = AMFConstructRate(avctx->time_base.den, avctx->time_base.num * avctx->ticks_per_frame);
-    }
-    AMF_ASSIGN_PROPERTY_RATE(res, ctx->decoder, AMF_VIDEO_DECODER_FRAME_RATE, framerate);
     // Color Metadata
     /// Color Range (Support for older Drivers)
     if (avctx->color_range == AVCOL_RANGE_JPEG) {
@@ -506,12 +499,35 @@ FF_ENABLE_DEPRECATION_WARNINGS
     fclose(fp);
 }
 
+
+static AMF_RESULT amf_get_property_buffer(AMFData *object, const wchar_t *name, AMFBuffer **val)
+{
+    AMF_RESULT res;
+    AMFVariantStruct var;
+    res = AMFVariantInit(&var);
+    if (res == AMF_OK) {
+        res = object->pVtbl->GetProperty(object, name, &var);
+        if (res == AMF_OK) {
+            if (var.type == AMF_VARIANT_INTERFACE) {
+                AMFGuid guid_AMFBuffer = IID_AMFBuffer();
+                AMFInterface *amf_interface = AMFVariantInterface(&var);
+                res = amf_interface->pVtbl->QueryInterface(amf_interface, &guid_AMFBuffer, (void**)val);
+            } else {
+                res = AMF_INVALID_DATA_TYPE;
+            }
+        }
+        AMFVariantClear(&var);
+    }
+    return res;
+}
+
 static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface, AVFrame *frame)
 {
     AMFPlane *plane;
     AMFVariantStruct var = {0};
     int       i;
     AMF_RESULT  ret = AMF_OK;
+    AvAmfDecoderContext *ctx = avctx->priv_data;
 
     if (!frame)
         return AMF_INVALID_POINTER;
@@ -598,6 +614,55 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->color_trc = avctx->color_trc;
     frame->color_primaries = avctx->color_primaries;
 
+    if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
+        AMFBuffer * hdrmeta_buffer = NULL;
+        if (pSurface->pVtbl->HasProperty(pSurface, L"av_frame_hdrmeta")) {
+            ret = amf_get_property_buffer((AMFData *)pSurface, L"av_frame_hdrmeta", &hdrmeta_buffer);
+        } else
+            AMF_GET_PROPERTY_INTERFACE(ret, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, AMFBuffer, hdrmeta_buffer);
+        if (hdrmeta_buffer != NULL) {
+            AMFHDRMetadata * hdrmeta = (AMFHDRMetadata*)hdrmeta_buffer->pVtbl->GetNative(hdrmeta_buffer);
+            if (ret != AMF_OK)
+                return ret;
+            if (hdrmeta != NULL) {
+                AVMasteringDisplayMetadata *mastering = av_mastering_display_metadata_create_side_data(frame);
+                const int chroma_den = 50000;
+                const int luma_den = 10000;
+
+                if (!mastering)
+                    return AVERROR(ENOMEM);
+
+                mastering->display_primaries[0][0] = av_make_q(hdrmeta->redPrimary[0], chroma_den);
+                mastering->display_primaries[0][1] = av_make_q(hdrmeta->redPrimary[1], chroma_den);
+
+                mastering->display_primaries[1][0] = av_make_q(hdrmeta->greenPrimary[0], chroma_den);
+                mastering->display_primaries[1][1] = av_make_q(hdrmeta->greenPrimary[1], chroma_den);
+
+                mastering->display_primaries[2][0] = av_make_q(hdrmeta->bluePrimary[0], chroma_den);
+                mastering->display_primaries[2][1] = av_make_q(hdrmeta->bluePrimary[1], chroma_den);
+
+                mastering->white_point[0] = av_make_q(hdrmeta->whitePoint[0], chroma_den);
+                mastering->white_point[1] = av_make_q(hdrmeta->whitePoint[1], chroma_den);
+
+                mastering->max_luminance = av_make_q(hdrmeta->maxMasteringLuminance, luma_den);
+                mastering->min_luminance = av_make_q(hdrmeta->maxMasteringLuminance, luma_den);
+
+                mastering->has_luminance = 1;
+                mastering->has_primaries = 1;
+            }
+
+            if (hdrmeta->maxContentLightLevel) {
+                AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
+
+                if (!light)
+                    return AVERROR(ENOMEM);
+
+                light->MaxCLL  = hdrmeta->maxContentLightLevel;
+                light->MaxFALL = hdrmeta->maxFrameAverageLightLevel;
+            }
+        }
+    }
+
     dumpAvFrame("./amfdec.json", frame);
 
     return ret;
@@ -649,15 +714,38 @@ fail:
     return ret;
 }
 
+static AMF_RESULT amf_set_property_buffer(AMFBuffer *object, const wchar_t *name, AMFBuffer *val)
+{
+    AMF_RESULT res;
+    AMFVariantStruct var;
+    res = AMFVariantInit(&var);
+    if (res == AMF_OK) {
+        AMFGuid guid_AMFInterface = IID_AMFInterface();
+        AMFInterface *amf_interface;
+        res = val->pVtbl->QueryInterface(val, &guid_AMFInterface, (void**)&amf_interface);
+
+        if (res == AMF_OK) {
+            res = AMFVariantAssignInterface(&var, amf_interface);
+            amf_interface->pVtbl->Release(amf_interface);
+        }
+        if (res == AMF_OK) {
+            res = object->pVtbl->SetProperty(object, name, var);
+        }
+        AMFVariantClear(&var);
+    }
+    return res;
+}
+
 static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer* pBuffer, const AVPacket* pPacket)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext *ctxt = ctx->context;
     AMF_RESULT res;
     amf_int64 pts = 0;
-    AMFBuffer * pMetadata;
+    AMFBuffer *pMetadata = NULL;
     size_t size;
-    AVMasteringDisplayMetadata* metadata = (AVMasteringDisplayMetadata*) av_packet_get_side_data(pPacket, AV_PKT_DATA_MASTERING_DISPLAY_METADATA, &size);
+    AVMasteringDisplayMetadata *metadata = NULL;
+    AMFHDRMetadata *metadataAMF = NULL;
 
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
@@ -676,13 +764,14 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
         }
         pBuffer->pVtbl->SetDuration(pBuffer, durationByFFMPEG);
     }
-
+    metadata = (AVMasteringDisplayMetadata*) av_packet_get_side_data(pPacket, AV_PKT_DATA_MASTERING_DISPLAY_METADATA, &size);
     if (metadata != NULL && size > 0)
     {
         if (metadata->max_luminance.num != 0 && metadata->has_luminance)
         {
-            ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, sizeof(metadata), &pMetadata);
-            AMFHDRMetadata *metadataAMF = (AMFHDRMetadata *)pMetadata->pVtbl->GetNative(pMetadata);
+            ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, sizeof(AMFHDRMetadata), &pMetadata);
+            metadataAMF = (AMFHDRMetadata *)pMetadata->pVtbl->GetNative(pMetadata);
+
             metadataAMF->redPrimary[0] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[0][0].num) / metadata->display_primaries[0][0].den);
             metadataAMF->redPrimary[1] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[0][1].num) / metadata->display_primaries[0][1].den);
 
@@ -699,9 +788,16 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
             metadataAMF->minMasteringLuminance = (amf_uint16)(10000.f * (float)(metadata->min_luminance.num) / metadata->min_luminance.den);
 
             AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, pMetadata);
-            // pBuffer->pVtbl->SetProperty(pBuffer, AMF_VIDEO_DECODER_HDR_METADATA, AMFVariant((AMFInterface*)pMetadata));
+            res = amf_set_property_buffer(pBuffer, L"av_frame_hdrmeta", pMetadata);
+            AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
         }
+    } else if (pBuffer->pVtbl->HasProperty(pBuffer, L"av_frame_hdrmeta")) {
+        res = amf_get_property_buffer((AMFData *)pBuffer, L"av_frame_hdrmeta", &pMetadata);
+        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, pMetadata);
+        res = amf_set_property_buffer(pBuffer, L"av_frame_hdrmeta", pMetadata);
+        AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
     }
+
     return AMF_OK;
 }
 
