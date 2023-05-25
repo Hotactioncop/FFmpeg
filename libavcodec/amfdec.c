@@ -163,7 +163,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
     /// Color Range (Support for older Drivers)
     if (avctx->color_range == AVCOL_RANGE_JPEG) {
         AMF_ASSIGN_PROPERTY_BOOL(res, ctx->decoder, AMF_VIDEO_DECODER_FULL_RANGE_COLOR, 1);
-    } else {
+    } else if (avctx->color_range != AVCOL_RANGE_UNSPECIFIED) {
         AMF_ASSIGN_PROPERTY_BOOL(res, ctx->decoder, AMF_VIDEO_DECODER_FULL_RANGE_COLOR, 0);
     }
     color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN;
@@ -191,11 +191,13 @@ static int amf_init_decoder(AVCodecContext *avctx)
         }
         break;
      }
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_PROFILE, color_profile);
-    /// Color Transfer Characteristics (AMF matches ISO/IEC)
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_TRANSFER_CHARACTERISTIC, (amf_int64)avctx->color_trc);
-    /// Color Primaries (AMF matches ISO/IEC)
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_PRIMARIES, (amf_int64)avctx->color_primaries);
+    if (color_profile != AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN)
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_PROFILE, color_profile);
+    if (avctx->color_trc != AVCOL_TRC_UNSPECIFIED)
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_TRANSFER_CHARACTERISTIC, (amf_int64)avctx->color_trc);
+
+    if (avctx->color_primaries != AVCOL_PRI_UNSPECIFIED)
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_COLOR_PRIMARIES, (amf_int64)avctx->color_primaries);
 
     AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_TIMESTAMP_MODE, ctx->timestamp_mode);
     AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_REORDER_MODE, ctx->decoder_mode);
@@ -616,10 +618,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
         AMFBuffer * hdrmeta_buffer = NULL;
-        if (pSurface->pVtbl->HasProperty(pSurface, L"av_frame_hdrmeta")) {
-            ret = amf_get_property_buffer((AMFData *)pSurface, L"av_frame_hdrmeta", &hdrmeta_buffer);
-        } else
-            AMF_GET_PROPERTY_INTERFACE(ret, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, AMFBuffer, hdrmeta_buffer);
+        ret = amf_get_property_buffer((AMFData *)pSurface, AMF_VIDEO_DECODER_HDR_METADATA, &hdrmeta_buffer);
         if (hdrmeta_buffer != NULL) {
             AMFHDRMetadata * hdrmeta = (AMFHDRMetadata*)hdrmeta_buffer->pVtbl->GetNative(hdrmeta_buffer);
             if (ret != AMF_OK)
@@ -744,8 +743,6 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
     amf_int64 pts = 0;
     AMFBuffer *pMetadata = NULL;
     size_t size;
-    AVMasteringDisplayMetadata *metadata = NULL;
-    AMFHDRMetadata *metadataAMF = NULL;
 
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
@@ -763,39 +760,6 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
             durationByFFMPEG = durationByFrameRate;
         }
         pBuffer->pVtbl->SetDuration(pBuffer, durationByFFMPEG);
-    }
-    metadata = (AVMasteringDisplayMetadata*) av_packet_get_side_data(pPacket, AV_PKT_DATA_MASTERING_DISPLAY_METADATA, &size);
-    if (metadata != NULL && size > 0)
-    {
-        if (metadata->max_luminance.num != 0 && metadata->has_luminance)
-        {
-            ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, sizeof(AMFHDRMetadata), &pMetadata);
-            metadataAMF = (AMFHDRMetadata *)pMetadata->pVtbl->GetNative(pMetadata);
-
-            metadataAMF->redPrimary[0] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[0][0].num) / metadata->display_primaries[0][0].den);
-            metadataAMF->redPrimary[1] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[0][1].num) / metadata->display_primaries[0][1].den);
-
-            metadataAMF->greenPrimary[0] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[1][0].num) / metadata->display_primaries[1][0].den);
-            metadataAMF->greenPrimary[1] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[1][1].num) / metadata->display_primaries[1][1].den);
-
-            metadataAMF->bluePrimary[0] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[2][0].num) / metadata->display_primaries[2][0].den);
-            metadataAMF->bluePrimary[1] = (amf_uint16)(50000.f * (float)(metadata->display_primaries[2][1].num) / metadata->display_primaries[2][1].den);
-
-            metadataAMF->whitePoint[0] = (amf_uint16)(50000.f * (float)(metadata->white_point[0].num) / metadata->white_point[0].den);
-            metadataAMF->whitePoint[1] = (amf_uint16)(50000.f * (float)(metadata->white_point[1].num) / metadata->white_point[1].den);
-
-            metadataAMF->maxMasteringLuminance = (amf_uint16)(10000.f * (float)(metadata->max_luminance.num) / metadata->max_luminance.den);
-            metadataAMF->minMasteringLuminance = (amf_uint16)(10000.f * (float)(metadata->min_luminance.num) / metadata->min_luminance.den);
-
-            AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, pMetadata);
-            res = amf_set_property_buffer(pBuffer, L"av_frame_hdrmeta", pMetadata);
-            AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
-        }
-    } else if (pBuffer->pVtbl->HasProperty(pBuffer, L"av_frame_hdrmeta")) {
-        res = amf_get_property_buffer((AMFData *)pBuffer, L"av_frame_hdrmeta", &pMetadata);
-        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->decoder, AMF_VIDEO_DECODER_HDR_METADATA, pMetadata);
-        res = amf_set_property_buffer(pBuffer, L"av_frame_hdrmeta", pMetadata);
-        AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
     }
 
     return AMF_OK;
