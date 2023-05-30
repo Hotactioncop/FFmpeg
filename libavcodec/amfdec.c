@@ -58,7 +58,7 @@ FIXME: Uncomment when AMF hw_context is ready
 static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
     &(const AVCodecHWConfigInternal) {
         .public = {
-            .pix_fmt     = // TODO: replace to AV_PIX_FMT_AMF,
+            .pix_fmt     = AV_PIX_FMT_AMF, // TODO: replace to AV_PIX_FMT_AMF,
             .methods     = AV_CODEC_HW_CONFIG_METHOD_HW_FRAMES_CTX |
                            AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX,
             .device_type = AV_HWDEVICE_TYPE_AMF,
@@ -125,14 +125,17 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AvAmfDecoderContext        *ctx = avctx->priv_data;
     const wchar_t     *codec_id = NULL;
     AMF_RESULT         res;
-    enum AMF_SURFACE_FORMAT formatOut = amf_av_to_amf_format(avctx->pix_fmt);
+    enum AMF_SURFACE_FORMAT formatOut = AMF_SURFACE_UNKNOWN;
     AMFBuffer * buffer;
     AMFRate     framerate;
     amf_int64   color_profile;
 
-    ctx->drained = 0;
+    formatOut = amf_av_to_amf_format(avctx->pix_fmt);
+
     if (formatOut == AMF_SURFACE_UNKNOWN)
         formatOut = AMF_SURFACE_NV12;
+
+    ctx->drained = 0;
 
     switch (avctx->codec->id) {
         case AV_CODEC_ID_H264:
@@ -505,7 +508,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 static AMF_RESULT amf_get_property_buffer(AMFData *object, const wchar_t *name, AMFBuffer **val)
 {
     AMF_RESULT res;
-    AMFVariantStruct var;
+    AMFVariantStruct var; 
     res = AMFVariantInit(&var);
     if (res == AMF_OK) {
         res = object->pVtbl->GetProperty(object, name, &var);
@@ -529,7 +532,6 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
     AMFVariantStruct var = {0};
     int       i;
     AMF_RESULT  ret = AMF_OK;
-    AvAmfDecoderContext *ctx = avctx->priv_data;
 
     if (!frame)
         return AMF_INVALID_POINTER;
@@ -585,7 +587,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* pSurface
                                                      amf_free_amfsurface,
                                                      pSurface,
                                                      AV_BUFFER_FLAG_READONLY);
-        //    }
+        //   }
         //}
 
     frame->format = amf_to_av_format(pSurface->pVtbl->GetFormat(pSurface));
@@ -608,8 +610,6 @@ FF_DISABLE_DEPRECATION_WARNINGS
 FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
-    // Color Metadata
-    /// Color Range (Support for older Drivers)
     frame->color_range = avctx->color_range;
 
     frame->colorspace = avctx->colorspace;
@@ -670,7 +670,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 static AMF_RESULT ff_amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMF_RESULT  ret;
+    AMF_RESULT  ret = AMF_OK;
     AMFSurface *surface = NULL;
     AVFrame *data = NULL;
     AMFData *data_out = NULL;
@@ -713,36 +713,11 @@ fail:
     return ret;
 }
 
-static AMF_RESULT amf_set_property_buffer(AMFBuffer *object, const wchar_t *name, AMFBuffer *val)
-{
-    AMF_RESULT res;
-    AMFVariantStruct var;
-    res = AMFVariantInit(&var);
-    if (res == AMF_OK) {
-        AMFGuid guid_AMFInterface = IID_AMFInterface();
-        AMFInterface *amf_interface;
-        res = val->pVtbl->QueryInterface(val, &guid_AMFInterface, (void**)&amf_interface);
-
-        if (res == AMF_OK) {
-            res = AMFVariantAssignInterface(&var, amf_interface);
-            amf_interface->pVtbl->Release(amf_interface);
-        }
-        if (res == AMF_OK) {
-            res = object->pVtbl->SetProperty(object, name, var);
-        }
-        AMFVariantClear(&var);
-    }
-    return res;
-}
-
 static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer* pBuffer, const AVPacket* pPacket)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext *ctxt = ctx->context;
-    AMF_RESULT res;
-    amf_int64 pts = 0;
-    AMFBuffer *pMetadata = NULL;
-    size_t size;
+    AMF_RESULT res = AMF_OK;
 
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
