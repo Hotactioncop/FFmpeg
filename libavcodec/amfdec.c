@@ -214,10 +214,13 @@ static int amf_init_decoder(AVCodecContext *avctx)
 
     if (avctx->extradata_size)
     { // set SPS/PPS extracted from stream or container; Alternatively can use parser->SetUseStartCodes(true)
-        ctx->context->pVtbl->AllocBuffer(ctx->context, AMF_MEMORY_HOST, avctx->extradata_size, &buffer);
-
-        memcpy(buffer->pVtbl->GetNative(buffer), avctx->extradata, avctx->extradata_size);
-        AMF_ASSIGN_PROPERTY_INTERFACE(res,ctx->decoder, AMF_VIDEO_DECODER_EXTRADATA, buffer);
+        res = ctx->context->pVtbl->AllocBuffer(ctx->context, AMF_MEMORY_HOST, avctx->extradata_size, &buffer);
+        if (res == AMF_OK) {
+            memcpy(buffer->pVtbl->GetNative(buffer), avctx->extradata, avctx->extradata_size);
+            AMF_ASSIGN_PROPERTY_INTERFACE(res,ctx->decoder, AMF_VIDEO_DECODER_EXTRADATA, buffer);
+            buffer->pVtbl->Release(buffer);
+            buffer = NULL;
+        }
     }
 
     res = ctx->decoder->pVtbl->Init(ctx->decoder, formatOut, avctx->width, avctx->height);
@@ -696,6 +699,7 @@ static AMF_RESULT ff_amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         AMFGuid guid = IID_AMFSurface();
         data_out->pVtbl->QueryInterface(data_out, &guid, (void**)&surface); // query for buffer interface
         data_out->pVtbl->Release(data_out);
+        data_out = NULL;
     }
 
     data = av_frame_alloc();
@@ -709,6 +713,7 @@ fail:
     }
     if (surface){
         surface->pVtbl->Release(surface);
+        surface = NULL;
     }
     return ret;
 }
@@ -794,6 +799,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
             *got_frame = 0;
         }
         buf->pVtbl->Release(buf);
+        buf = NULL;
     }
 
     while(1)
