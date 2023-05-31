@@ -765,8 +765,6 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     memcpy(pMem, pPacket->data, pPacket->size);
     memset((amf_int8*)(pMem)+pPacket->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 
-    // now that we created the buffer, it's time to update
-    // it's properties from the packet information...
     return amf_update_buffer_properties(avctx, pBuffer, pPacket);
 }
 
@@ -795,6 +793,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         {
             *got_frame = 0;
         }
+        buf->pVtbl->Release(buf);
     }
 
     while(1)
