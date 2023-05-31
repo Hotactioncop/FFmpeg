@@ -457,57 +457,6 @@ static int ff_amf_decode_init(AVCodecContext *avctx)
     return ret;
 }
 
-static void dumpAvFrame(const char * path, const AVFrame *frame)
-{
-    FILE *fp;
-    fp = fopen(path, "ab");
-    if(!fp)
-       return;
-    fprintf(fp,"{\n");
-    fprintf(fp, "    \"best_effort_timestamp\": %lld,\n", frame->best_effort_timestamp);
-    fprintf(fp, "    \"crop_bottom\": %d,\n", (int)frame->crop_bottom);
-    fprintf(fp, "    \"crop_left\": %d,\n", (int)frame->crop_left);
-    fprintf(fp, "    \"crop_right\": %d,\n", (int)frame->crop_right);
-    fprintf(fp, "    \"crop_top\": %d,\n", (int)frame->crop_top);
-    fprintf(fp, "    \"decode_error_flags\": %d,\n", frame->decode_error_flags);
-    fprintf(fp, "    \"flags\": %d,\n", frame->flags);
-    fprintf(fp, "    \"format\": %d,\n", frame->format);
-    fprintf(fp, "    \"height\": %d,\n", frame->height);
-    fprintf(fp, "    \"interlaced_frame\": %d,\n", frame->interlaced_frame);
-    fprintf(fp, "    \"key_frame\": %d,\n", frame->key_frame);
-    fprintf(fp, "    \"nb_extended_buf\": %d,\n", frame->nb_extended_buf);
-    fprintf(fp, "    \"nb_samples\": %d,\n", frame->nb_samples);
-    fprintf(fp, "    \"nb_side_data\": %d,\n", frame->nb_side_data);
-    fprintf(fp, "    \"palette_has_changed\": %d,\n", frame->palette_has_changed);
-    fprintf(fp, "    \"pict_type\": %d,\n", (int)frame->pict_type);
-    fprintf(fp, "    \"pkt_dts\": %lld,\n", frame->pkt_dts);
-    fprintf(fp, "    \"duration\": %lld,\n", frame->duration);
-#if FF_API_FRAME_PKT
-FF_DISABLE_DEPRECATION_WARNINGS
-    fprintf(fp, "    \"pkt_duration\": %lld,\n", frame->pkt_duration);
-    fprintf(fp, "    \"pkt_pos\": %lld,\n", frame->pkt_pos);
-    fprintf(fp, "    \"pkt_size\": %d,\n", frame->pkt_size);
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-    fprintf(fp, "    \"pts\": %lld,\n", frame->pts);
-    fprintf(fp, "    \"quality\": %d,\n", frame->quality);
-    fprintf(fp, "    \"repeat_pict\": %d,\n", frame->repeat_pict);
-    fprintf(fp, "    \"sample_rate\": %d,\n", frame->sample_rate);
-    fprintf(fp, "    \"top_field_first\": %d,\n", frame->top_field_first);
-    fprintf(fp, "    \"width\": %d,\n", frame->width);
-    fprintf(fp, "    \"sample_aspect_ratio_den\": %d,\n", frame->sample_aspect_ratio.den);
-    fprintf(fp, "    \"sample_aspect_ratio_num\": %d,\n", frame->sample_aspect_ratio.num);
-
-    fprintf(fp, "    \"color_range\": %d,\n", (int)frame->color_range);
-    fprintf(fp, "    \"color_trc\": %d,\n", (int)frame->color_trc);
-    fprintf(fp, "    \"colorspace\": %d,\n", (int)frame->colorspace);
-    fprintf(fp, "    \"pict_type\": %d,\n", (int)frame->pict_type);
-    fprintf(fp,"}\n");
-
-    fclose(fp);
-}
-
-
 static AMF_RESULT amf_get_property_buffer(AMFData *object, const wchar_t *name, AMFBuffer **val)
 {
     AMF_RESULT res;
@@ -664,8 +613,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
     }
-
-    dumpAvFrame("./amfdec.json", frame);
 
     return ret;
 }
