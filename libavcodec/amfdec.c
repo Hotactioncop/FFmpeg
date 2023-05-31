@@ -600,16 +600,15 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
                 mastering->has_luminance = 1;
                 mastering->has_primaries = 1;
-            }
+                if (hdrmeta->maxContentLightLevel) {
+                   AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
 
-            if (hdrmeta->maxContentLightLevel) {
-                AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
+                    if (!light)
+                        return AVERROR(ENOMEM);
 
-                if (!light)
-                    return AVERROR(ENOMEM);
-
-                light->MaxCLL  = hdrmeta->maxContentLightLevel;
-                light->MaxFALL = hdrmeta->maxFrameAverageLightLevel;
+                    light->MaxCLL  = hdrmeta->maxContentLightLevel;
+                    light->MaxFALL = hdrmeta->maxFrameAverageLightLevel;
+                }
             }
         }
     }
