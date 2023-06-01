@@ -16,16 +16,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "amfdec.h"
 #include <AMF/core/Variant.h>
 #include <AMF/core/PropertyStorage.h>
 #include <AMF/components/FFMPEGFileDemuxer.h>
-#include "libavutil/imgutils.h"
-#include "libavutil/time.h"
+#include "amf.h"
+#include "amfdec.h"
 #include "codec_internal.h"
 #include "hwconfig.h"
+#include "libavutil/imgutils.h"
+#include "libavutil/time.h"
 #include "libavutil/mastering_display_metadata.h"
-#include "amf.h"
 
 #if CONFIG_D3D11VA
 #include "libavutil/hwcontext_d3d11va.h"
@@ -145,7 +145,6 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMF_RESULT         res;
     enum AMF_SURFACE_FORMAT formatOut = AMF_SURFACE_UNKNOWN;
     AMFBuffer * buffer;
-    AMFRate     framerate;
     amf_int64   color_profile;
 
     formatOut = amf_av_to_amf_format(avctx->pix_fmt);
@@ -686,7 +685,7 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext *ctxt = ctx->context;
-    AMF_RESULT res = AMF_OK;
+    AMF_RESULT res;
 
     AMF_RETURN_IF_FALSE(ctxt, pBuffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pPacket != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");

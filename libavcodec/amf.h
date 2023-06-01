@@ -18,6 +18,7 @@
 
 #ifndef AV_AMF_H
 #define AV_AMF_H
+
 #include <AMF/core/Surface.h>
 #include "libavformat/avformat.h"
 

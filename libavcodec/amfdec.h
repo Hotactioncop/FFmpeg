@@ -18,19 +18,19 @@
 
 #ifndef AVCODEC_AMFDEC_H
 #define AVCODEC_AMFDEC_H
-//#include "internal.h"
 
-#include "libavutil/frame.h"
-#include "libavutil/fifo.h"
-#include "libavutil/opt.h"
-#include "libavformat/avformat.h"
 #include <AMF/core/Buffer.h>
-#include <AMF/components/Component.h>
 #include <AMF/core/Factory.h>
-#include <AMF/core/Surface.h>
 #include <AMF/core/Context.h>
-#include "avcodec.h"
+#include <AMF/core/Surface.h>
+#include <AMF/components/Component.h>
 #include <AMF/components/VideoDecoderUVD.h>
+
+#include "avcodec.h"
+#include "libavformat/avformat.h"
+#include "libavutil/fifo.h"
+#include "libavutil/frame.h"
+#include "libavutil/opt.h"
 
 typedef struct AmfTraceWriter {
     AMFTraceWriterVtbl *vtbl;
@@ -38,7 +38,7 @@ typedef struct AmfTraceWriter {
 } AmfTraceWriter;
 
 /**
-* AMF encoder context
+* AMF decoder context
 */
 
 typedef struct AvAmfDecoderContext {
