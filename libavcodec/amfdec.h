@@ -48,7 +48,7 @@ typedef struct AvAmfDecoderContext {
     AMFFactory         *factory;
     AVBufferRef        *amf_device_ctx;
 
-    //encoder
+    //decoder
     AMFComponent       *decoder; ///< AMF decoder object
     AMF_SURFACE_FORMAT  format;  ///< AMF surface format
 
