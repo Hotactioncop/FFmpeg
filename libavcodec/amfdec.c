@@ -566,7 +566,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     surface->pVtbl->GetProperty(surface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
 
-    //frame->duration = pSurface->pVtbl->GetDuration(pSurface);
+    frame->duration = surface->pVtbl->GetDuration(surface);
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -684,19 +684,11 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
 
     AMF_RETURN_IF_FALSE(ctxt, buffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pkt != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
-    //pts = av_rescale_q(pPacket->dts, avctx->time_base, AMF_TIME_BASE_Q);
     buffer->pVtbl->SetPts(buffer, pkt->pts);
+    buffer->pVtbl->SetDuration(buffer, pkt->duration);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:dts", pkt->dts);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:size", pkt->size);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:pos", pkt->pos);
-    if (pkt->duration != 0) {
-        amf_int64 durationByFFMPEG    = av_rescale_q(pkt->duration, avctx->time_base, AMF_TIME_BASE_Q);
-        amf_int64 durationByFrameRate = (amf_int64)((amf_double)AMF_SECOND / ((amf_double)avctx->framerate.num / (amf_double)avctx->framerate.den));
-        if (abs(durationByFrameRate - durationByFFMPEG) > AMF_MIN(durationByFrameRate, durationByFFMPEG) / 2) {
-            durationByFFMPEG = durationByFrameRate;
-        }
-        buffer->pVtbl->SetDuration(buffer, durationByFFMPEG);
-    }
 
     return AMF_OK;
 }
@@ -713,7 +705,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     AMF_RETURN_IF_FALSE(ctxt, buffer != NULL, AMF_INVALID_ARG, "amf_buffer_from_packet() - buffer pointer not passed in");
 
     err = ctxt->pVtbl->AllocBuffer(ctxt, AMF_MEMORY_HOST, pkt->size + AV_INPUT_BUFFER_PADDING_SIZE, buffer);
-    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "amf_buffer_from_packet() - AllocBuffer failed");
+    AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "amf_buffer_from_packet() -   failed");
     buf = *buffer;
     err = buf->pVtbl->SetSize(buf, pkt->size);
     AMF_RETURN_IF_FALSE(ctxt, err == AMF_OK, err, "amf_buffer_from_packet() - SetSize failed");
