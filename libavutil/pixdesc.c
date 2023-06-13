@@ -2109,6 +2109,10 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_BE,
     },
+    [AV_PIX_FMT_AMF] = {
+        .name = "amf",
+        .flags = AV_PIX_FMT_FLAG_HWACCEL,
+    },
     [AV_PIX_FMT_QSV] = {
         .name = "qsv",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
