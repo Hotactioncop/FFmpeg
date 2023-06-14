@@ -19,6 +19,7 @@
 #ifndef AVCODEC_AMFENC_H
 #define AVCODEC_AMFENC_H
 
+#include <AMF/components/ColorSpace.h>
 #include <AMF/components/VideoEncoderVCE.h>
 #include <AMF/components/VideoEncoderHEVC.h>
 #include <AMF/components/VideoEncoderAV1.h>

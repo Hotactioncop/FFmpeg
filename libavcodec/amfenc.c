@@ -52,6 +52,7 @@ const enum AVPixelFormat ff_amf_pix_fmts[] = {
 #if CONFIG_DXVA2
     AV_PIX_FMT_DXVA2_VLD,
 #endif
+    AV_PIX_FMT_P010,
     AV_PIX_FMT_NONE
 };
 
@@ -64,6 +65,7 @@ static const FormatMap format_map[] =
 {
     { AV_PIX_FMT_NONE,       AMF_SURFACE_UNKNOWN },
     { AV_PIX_FMT_NV12,       AMF_SURFACE_NV12 },
+    { AV_PIX_FMT_P010,       AMF_SURFACE_P010 },
     { AV_PIX_FMT_BGR0,       AMF_SURFACE_BGRA },
     { AV_PIX_FMT_RGB0,       AMF_SURFACE_RGBA },
     { AV_PIX_FMT_GRAY8,      AMF_SURFACE_GRAY8 },
