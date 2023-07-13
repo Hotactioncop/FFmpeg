@@ -71,6 +71,7 @@ static const FormatMap format_map[] =
 {
     { AV_PIX_FMT_NONE,       AMF_SURFACE_UNKNOWN },
     { AV_PIX_FMT_NV12,       AMF_SURFACE_NV12 },
+    { AV_PIX_FMT_P010,       AMF_SURFACE_P010 },
 
     { AV_PIX_FMT_BGR0,       AMF_SURFACE_BGRA },
     { AV_PIX_FMT_BGRA,       AMF_SURFACE_BGRA },
@@ -103,6 +104,8 @@ typedef struct AMFScaleContext {
     int width, height;
     enum AVPixelFormat format;
     int scale_type;
+    int color_profile;
+    int color_range;
 
     char *w_expr;
     char *h_expr;
@@ -294,6 +297,7 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
     int i;
     static const enum AVPixelFormat input_pix_fmts[] = {
         AV_PIX_FMT_NV12,
+        AV_PIX_FMT_P010,
         AV_PIX_FMT_0RGB,
         AV_PIX_FMT_BGR0,
         AV_PIX_FMT_RGB0,
@@ -505,6 +509,36 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     if (!ctx->converter)
         return AVERROR(EINVAL);
+    switch(ctx->color_profile) {
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_601:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_601;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_601;
+        }
+        break;
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_709:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_709;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_709;
+        }
+        break;
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_2020;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020;
+        }
+        break;
+    default:
+        amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN;
+        break;
+    }
+
+    if (amf_color_profile != AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN) {
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_COLOR_PROFILE, amf_color_profile);
+    }
 
     ret = amf_avframe_to_amfsurface(avctx, in, &surface_in);
     if (ret < 0)
@@ -525,33 +559,34 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     out = amf_amfsurface_to_avframe(avctx, surface_out);
 
     ret = av_frame_copy_props(out, in);
-    if (ret < 0)
-        goto fail;
-
-    switch(in->colorspace) {
-    case AVCOL_SPC_BT470BG:
-    case AVCOL_SPC_SMPTE170M:
-    case AVCOL_SPC_SMPTE240M:
-        amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_601;
+    switch(ctx->color_profile) {
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_601:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_601;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_601;
+        }
         break;
-    case AVCOL_SPC_BT709:
-        amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_709;
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_709:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_709;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_709;
+        }
         break;
-    case AVCOL_SPC_BT2020_NCL:
-    case AVCOL_SPC_BT2020_CL:
-        amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020;
-        break;
-    case AVCOL_SPC_RGB:
-        amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_JPEG;
+    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020:
+        if (ctx->color_range == AMF_COLOR_RANGE_FULL) {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_2020;
+        } else {
+            amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020;
+        }
         break;
     default:
         amf_color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN;
         break;
     }
-
-    if (amf_color_profile != AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN) {
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_COLOR_PROFILE, amf_color_profile);
-    }
+    if (ret < 0)
+        goto fail;
 
     out->format = outlink->format;
     out->width  = outlink->w;
@@ -582,14 +617,20 @@ fail:
 #define OFFSET(x) offsetof(AMFScaleContext, x)
 #define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
 static const AVOption scale_amf_options[] = {
-    { "w",      "Output video width",               OFFSET(w_expr),     AV_OPT_TYPE_STRING, { .str = "iw"   }, .flags = FLAGS },
-    { "h",      "Output video height",              OFFSET(h_expr),     AV_OPT_TYPE_STRING, { .str = "ih"   }, .flags = FLAGS },
-    { "format", "Output pixel format",              OFFSET(format_str), AV_OPT_TYPE_STRING, { .str = "same" }, .flags = FLAGS },
+    { "w",              "Output video width",   OFFSET(w_expr),     AV_OPT_TYPE_STRING, { .str = "iw"   }, .flags = FLAGS },
+    { "h",              "Output video height",  OFFSET(h_expr),     AV_OPT_TYPE_STRING, { .str = "ih"   }, .flags = FLAGS },
+    { "format",         "Output pixel format",  OFFSET(format_str), AV_OPT_TYPE_STRING, { .str = "same" }, .flags = FLAGS },
 
-    { "scale_type",    "Scale type",                OFFSET(scale_type),      AV_OPT_TYPE_INT,   { .i64 = AMF_VIDEO_CONVERTER_SCALE_BILINEAR },
-        AMF_VIDEO_CONVERTER_SCALE_BILINEAR, AMF_VIDEO_CONVERTER_SCALE_BICUBIC, FLAGS, "scale_type" },
-    { "bilinear",      "Bilinear",      0,                       AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_SCALE_BILINEAR }, 0, 0, FLAGS, "scale_type" },
-    { "bicubic",       "Bicubic",       0,                       AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_SCALE_BICUBIC },  0, 0, FLAGS, "scale_type" },
+    { "scale_type",     "Scale type",           OFFSET(scale_type),      AV_OPT_TYPE_INT,   { .i64 = AMF_VIDEO_CONVERTER_SCALE_BILINEAR }, AMF_VIDEO_CONVERTER_SCALE_BILINEAR, AMF_VIDEO_CONVERTER_SCALE_BICUBIC, FLAGS, "scale_type" },
+    { "bilinear",       "Bilinear",         0,  AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_SCALE_BILINEAR }, 0, 0, FLAGS, "scale_type" },
+    { "bicubic",        "Bicubic",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_SCALE_BICUBIC },  0, 0, FLAGS, "scale_type" },
+    { "color_profile",  "Color profile",        OFFSET(color_profile), AV_OPT_TYPE_INT,   { .i64 = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN }, AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN, AMF_VIDEO_CONVERTER_COLOR_PROFILE_FULL_2020, FLAGS, "color_profile" },
+    { "bt601",          "BT.601",           0,  AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_COLOR_PROFILE_601 }, 0, 0, FLAGS, "color_profile" },
+    { "bt709",          "BT.709",           0,  AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_COLOR_PROFILE_709 },  0, 0, FLAGS, "color_profile" },
+    { "bt2020",         "BT.2020",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020 },  0, 0, FLAGS, "color_profile" },
+    { "color_range",    "Color range",          OFFSET(color_range),      AV_OPT_TYPE_INT,   { .i64 = AMF_COLOR_RANGE_UNDEFINED }, AMF_COLOR_RANGE_UNDEFINED, AMF_COLOR_RANGE_FULL, FLAGS, "color_range" },
+    { "studio",         "Studio",           0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_RANGE_STUDIO }, 0, 0, FLAGS, "color_range" },
+    { "full",           "Full",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_RANGE_FULL }, 0, 0, FLAGS, "color_range" },
 
     { NULL },
 };
