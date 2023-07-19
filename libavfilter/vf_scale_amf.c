@@ -530,6 +530,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     if (ctx->primaries != AMF_COLOR_PRIMARIES_UNDEFINED) {
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_OUTPUT_COLOR_PRIMARIES, ctx->primaries);
     }
+
     if (ctx->trc != AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED) {
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_OUTPUT_TRANSFER_CHARACTERISTIC, ctx->trc);
     }
@@ -579,25 +580,26 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     ret = av_frame_copy_props(out, in);
     out_colorspace = AVCOL_SPC_UNSPECIFIED;
 
-    switch(ctx->color_profile) {
-    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_601:
-        out_colorspace = AVCOL_SPC_SMPTE170M;
+    if (ctx->color_profile != AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN) {
+        switch(ctx->color_profile) {
+        case AMF_VIDEO_CONVERTER_COLOR_PROFILE_601:
+            out_colorspace = AVCOL_SPC_SMPTE170M;
         break;
-    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_709:
-        out_colorspace = AVCOL_SPC_BT709;
+        case AMF_VIDEO_CONVERTER_COLOR_PROFILE_709:
+            out_colorspace = AVCOL_SPC_BT709;
         break;
-    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020:
-        out_colorspace = AVCOL_SPC_BT2020_NCL;
+        case AMF_VIDEO_CONVERTER_COLOR_PROFILE_2020:
+            out_colorspace = AVCOL_SPC_BT2020_NCL;
         break;
-    case AMF_VIDEO_CONVERTER_COLOR_PROFILE_JPEG:
-        out_colorspace = AVCOL_SPC_RGB;
+        case AMF_VIDEO_CONVERTER_COLOR_PROFILE_JPEG:
+            out_colorspace = AVCOL_SPC_RGB;
         break;
-    default:
-        out_colorspace = AVCOL_SPC_UNSPECIFIED;
+        default:
+            out_colorspace = AVCOL_SPC_UNSPECIFIED;
         break;
+        }
+        out->colorspace = out_colorspace;
     }
-
-    out->colorspace = out_colorspace;
 
     out_color_range = AVCOL_RANGE_UNSPECIFIED;
     if (ctx->color_range == AMF_COLOR_RANGE_FULL)
@@ -607,6 +609,12 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     if (ctx->color_range != AMF_COLOR_RANGE_UNDEFINED)
         out->color_range = out_color_range;
+
+    if (ctx->primaries != AMF_COLOR_PRIMARIES_UNDEFINED)
+        out->color_primaries = ctx->primaries;
+
+    if (ctx->trc != AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED)
+        out->color_trc = ctx->trc;
 
 
     if (ret < 0)
@@ -658,7 +666,7 @@ static const AVOption scale_amf_options[] = {
     { "studio",         "Studio",                   0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_RANGE_STUDIO }, 0, 0, FLAGS, "color_range" },
     { "full",           "Full",                     0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_RANGE_FULL }, 0, 0, FLAGS, "color_range" },
 
-    { "primaries",      "Output color primaries",   OFFSET(primaries),  AV_OPT_TYPE_INT,   { .i64 = AMF_COLOR_PRIMARIES_UNDEFINED }, AMF_COLOR_PRIMARIES_UNDEFINED, AMF_COLOR_PRIMARIES_CCCS, FLAGS, "primaries" },
+    { "primaries",      "Output color primaries",   OFFSET(primaries),  AV_OPT_TYPE_INT,   { .i64 = AMF_COLOR_PRIMARIES_UNDEFINED }, AMF_COLOR_PRIMARIES_UNDEFINED, AMF_COLOR_PRIMARIES_JEDEC_P22, FLAGS, "primaries" },
     { "bt709",          "BT.709",                   0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_BT709 }, 0, 0, FLAGS, "primaries" },
     { "bt470m",         "BT.470M",                  0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_BT470M }, 0, 0, FLAGS, "primaries" },
     { "bt470bg",        "BT.470BG",                 0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_BT470BG }, 0, 0, FLAGS, "primaries" },
@@ -670,11 +678,10 @@ static const AVOption scale_amf_options[] = {
     { "smpte431",       "SMPTE431",                 0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_SMPTE431 }, 0, 0, FLAGS, "primaries" },
     { "smpte432",       "SMPTE432",                 0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_SMPTE432 }, 0, 0, FLAGS, "primaries" },
     { "jedec-p22",      "JEDEC_P22",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_JEDEC_P22 }, 0, 0, FLAGS, "primaries" },
-    { "cccs",           "scRGB",                    0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_PRIMARIES_CCCS }, 0, 0, FLAGS, "primaries" },
 
     { "trc",            "Output transfer characteristics",  OFFSET(trc),  AV_OPT_TYPE_INT,   { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED }, AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED, AMF_COLOR_TRANSFER_CHARACTERISTIC_ARIB_STD_B67, FLAGS, "trc" },
-    { "gamma22",        "GAMMA22",                  0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT709 }, 0, 0, FLAGS, "trc" },
-    { "bt709",          "BT.709",                   0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_GAMMA22 }, 0, 0, FLAGS, "trc" },
+    { "bt709",          "BT.709",                   0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT709 }, 0, 0, FLAGS, "trc" },
+    { "gamma22",        "GAMMA22",                  0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_GAMMA22 }, 0, 0, FLAGS, "trc" },
     { "gamma28",        "GAMMA28",                  0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_GAMMA28 }, 0, 0, FLAGS, "trc" },
     { "smpte170m",      "SMPTE170M",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE170M }, 0, 0, FLAGS, "trc" },
     { "smpte240m",      "SMPTE240M",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE240M }, 0, 0, FLAGS, "trc" },
@@ -684,12 +691,11 @@ static const AVOption scale_amf_options[] = {
     { "iec61966-2-4",   "IEC61966_2_4",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_IEC61966_2_4 }, 0, 0, FLAGS, "trc" },
     { "bt1361-ecg",     "BT1361_ECG",               0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT1361_ECG }, 0, 0, FLAGS, "trc" },
     { "iec61966-2-1",   "IEC61966_2_1",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_IEC61966_2_1 }, 0, 0, FLAGS, "trc" },
-    { "bt2020-10",      "BT.2020_10",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT2020_10 }, 0, 0, FLAGS, "trc" },
-    { "bt2020-12",      "BT.2020-12",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT2020_12 }, 0, 0, FLAGS, "trc" },
+    { "bt2020-10",      "BT.2020_10",               0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT2020_10 }, 0, 0, FLAGS, "trc" },
+    { "bt2020-12",      "BT.2020-12",               0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_BT2020_12 }, 0, 0, FLAGS, "trc" },
     { "smpte2084",      "SMPTE2084",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE2084 }, 0, 0, FLAGS, "trc" },
     { "smpte428",       "SMPTE428",                 0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE428 }, 0, 0, FLAGS, "trc" },
-    { "arib-std-b67",   "ARIB_STD_B67",            0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_ARIB_STD_B67 }, 0, 0, FLAGS, "trc" },
-
+    { "arib-std-b67",   "ARIB_STD_B67",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_COLOR_TRANSFER_CHARACTERISTIC_ARIB_STD_B67 }, 0, 0, FLAGS, "trc" },
 
     { NULL },
 };
