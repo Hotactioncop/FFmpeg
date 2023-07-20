@@ -89,6 +89,7 @@ typedef struct AmfContext {
     int                 quality;
     int                 b_frame_delta_qp;
     int                 ref_b_frame_delta_qp;
+    int                 smart_access_video;
 
     // Dynamic options, can be set after Init() call
 
@@ -178,5 +179,10 @@ extern const enum AVPixelFormat ff_amf_pix_fmts[];
         av_log(avctx, AV_LOG_ERROR, __VA_ARGS__); \
         return ret_value; \
     }
+
+#define AMF_PER_CODEC_OPTION(name) \
+   (avctx->codec->id == AV_CODEC_ID_AV1  ? AMF_VIDEO_ENCODER_AV1_  ## name : \
+    avctx->codec->id == AV_CODEC_ID_HEVC ? AMF_VIDEO_ENCODER_HEVC_ ## name : \
+                                           AMF_VIDEO_ENCODER_      ## name)
 
 #endif //AVCODEC_AMFENC_H

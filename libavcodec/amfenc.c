@@ -369,6 +369,17 @@ static int amf_init_encoder(AVCodecContext *avctx)
     res = ctx->factory->pVtbl->CreateComponent(ctx->factory, ctx->context, codec_id, &ctx->encoder);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_ENCODER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", codec_id, res);
 
+    if (ctx->smart_access_video != -1) {
+        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_PER_CODEC_OPTION(ENABLE_SMART_ACCESS_VIDEO), ctx->smart_access_video != 0);
+        if (res != AMF_OK) {
+            av_log(avctx, AV_LOG_ERROR, "The Smart Access Video is not supported by AMF.\n");
+            if (ctx->smart_access_video != 0)
+                return AVERROR(ENOSYS);
+        } else {
+            av_log(avctx, AV_LOG_INFO, "The Smart Access Video (%d) is set.\n", ctx->smart_access_video);
+        }
+    }
+
     return 0;
 }
 
