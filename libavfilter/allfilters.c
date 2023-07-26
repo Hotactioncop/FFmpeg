@@ -423,6 +423,7 @@ extern const AVFilter ff_vf_rotate;
 extern const AVFilter ff_vf_sab;
 extern const AVFilter ff_vf_scale;
 extern const AVFilter ff_vf_scale_amf;
+extern const AVFilter ff_vf_scale_amf_hq;
 extern const AVFilter ff_vf_scale_cuda;
 extern const AVFilter ff_vf_scale_npp;
 extern const AVFilter ff_vf_scale_qsv;
