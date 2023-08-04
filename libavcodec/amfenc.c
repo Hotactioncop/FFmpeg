@@ -36,6 +36,7 @@
 #include "amfenc.h"
 #include "encode.h"
 #include "internal.h"
+#include "libavutil/mastering_display_metadata.h"
 
 #if CONFIG_D3D11VA
 #include <d3d11.h>
@@ -49,6 +50,56 @@
 
 #define PTS_PROP L"PtsProp"
 
+static int amf_save_hdr_metadata(AVCodecContext *avctx, const AVFrame *frame, AMFHDRMetadata *hdrmeta)
+{
+    AVFrameSideData            *sd_display;
+    AVFrameSideData            *sd_light;
+    AVMasteringDisplayMetadata *display_meta;
+    AVContentLightMetadata     *light_meta;
+
+    sd_display = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
+    if (sd_display) {
+        display_meta = (AVMasteringDisplayMetadata *)sd_display->data;
+        if (display_meta->has_luminance) {
+            const unsigned int luma_den = 10000;
+            hdrmeta->maxMasteringLuminance =
+                (amf_uint32)(luma_den * av_q2d(display_meta->max_luminance));
+            hdrmeta->minMasteringLuminance =
+                FFMIN((amf_uint32)(luma_den * av_q2d(display_meta->min_luminance)), hdrmeta->maxMasteringLuminance);
+        }
+        if (display_meta->has_primaries) {
+            const unsigned int chroma_den = 50000;
+            hdrmeta->redPrimary[0] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[0][0])), chroma_den);
+            hdrmeta->redPrimary[1] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[0][1])), chroma_den);
+            hdrmeta->greenPrimary[0] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[1][0])), chroma_den);
+            hdrmeta->greenPrimary[1] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[1][1])), chroma_den);
+            hdrmeta->bluePrimary[0] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[2][0])), chroma_den);
+            hdrmeta->bluePrimary[1] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->display_primaries[2][1])), chroma_den);
+            hdrmeta->whitePoint[0] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->white_point[0])), chroma_den);
+            hdrmeta->whitePoint[1] =
+                FFMIN((amf_uint16)(chroma_den * av_q2d(display_meta->white_point[1])), chroma_den);
+        }
+
+        sd_light = av_frame_get_side_data(frame, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
+        if (sd_light) {
+            light_meta = (AVContentLightMetadata *)sd_light->data;
+            if (light_meta) {
+                hdrmeta->maxContentLightLevel = (amf_uint16)light_meta->MaxCLL;
+                hdrmeta->maxFrameAverageLightLevel = (amf_uint16)light_meta->MaxFALL;
+            }
+        }
+        return 0;
+    }
+    return 1;
+}
+
 const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
@@ -59,8 +110,38 @@ const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_DXVA2_VLD,
 #endif
     AV_PIX_FMT_AMF,
+    AV_PIX_FMT_P010,
     AV_PIX_FMT_NONE
 };
+
+typedef struct FormatMap {
+    enum AVPixelFormat       av_format;
+    enum AMF_SURFACE_FORMAT  amf_format;
+} FormatMap;
+
+static const FormatMap format_map[] =
+{
+    { AV_PIX_FMT_NONE,       AMF_SURFACE_UNKNOWN },
+    { AV_PIX_FMT_NV12,       AMF_SURFACE_NV12 },
+    { AV_PIX_FMT_P010,       AMF_SURFACE_P010 },
+    { AV_PIX_FMT_BGR0,       AMF_SURFACE_BGRA },
+    { AV_PIX_FMT_RGB0,       AMF_SURFACE_RGBA },
+    { AV_PIX_FMT_RGBA,       AMF_SURFACE_RGBA },
+    { AV_PIX_FMT_GRAY8,      AMF_SURFACE_GRAY8 },
+    { AV_PIX_FMT_YUV420P,    AMF_SURFACE_YUV420P },
+    { AV_PIX_FMT_YUYV422,    AMF_SURFACE_YUY2 },
+};
+
+static enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
+{
+    int i;
+    for (i = 0; i < amf_countof(format_map); i++) {
+        if (format_map[i].av_format == fmt) {
+            return format_map[i].amf_format;
+        }
+    }
+    return AMF_SURFACE_UNKNOWN;
+}
 
 static int amf_init_context(AVCodecContext *avctx)
 {
@@ -438,6 +519,26 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             frame_ref_storage_buffer->pVtbl->Release(frame_ref_storage_buffer);
         }
 
+ 
+        // HDR10 metadata
+        if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
+            AMFBuffer * hdrmeta_buffer = NULL;
+            res = ctx->context->pVtbl->AllocBuffer(ctx->context, AMF_MEMORY_HOST, sizeof(AMFHDRMetadata), &hdrmeta_buffer);
+            if (res == AMF_OK) {
+                AMFHDRMetadata * hdrmeta = (AMFHDRMetadata*)hdrmeta_buffer->pVtbl->GetNative(hdrmeta_buffer);
+                if (amf_save_hdr_metadata(avctx, frame, hdrmeta) == 0) {
+                    switch (avctx->codec->id) {
+                    case AV_CODEC_ID_H264:
+                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_INPUT_HDR_METADATA, hdrmeta_buffer); break;
+                    case AV_CODEC_ID_HEVC:
+                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_INPUT_HDR_METADATA, hdrmeta_buffer); break;
+                    }
+                    res = amf_set_property_buffer(surface, L"av_frame_hdrmeta", hdrmeta_buffer);
+                    AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
+                }
+                hdrmeta_buffer->pVtbl->Release(hdrmeta_buffer);
+            }
+        }
         surface->pVtbl->SetPts(surface, frame->pts);
         AMF_ASSIGN_PROPERTY_INT64(res, surface, PTS_PROP, frame->pts);
 
@@ -496,33 +597,26 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 
                 data->pVtbl->Release(data);
 
-                AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
-            }
-        }
-        res_resubmit = AMF_OK;
-        if (ctx->delayed_surface != NULL) { // try to resubmit frame
-            res_resubmit = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)ctx->delayed_surface);
-            if (res_resubmit != AMF_INPUT_FULL) {
-                int64_t pts = ctx->delayed_surface->pVtbl->GetPts(ctx->delayed_surface);
-                ctx->delayed_surface->pVtbl->Release(ctx->delayed_surface);
-                ctx->delayed_surface = NULL;
-                av_frame_unref(ctx->delayed_frame);
-                AMF_RETURN_IF_FALSE(ctx, res_resubmit == AMF_OK, AVERROR_UNKNOWN, "Repeated SubmitInput() failed with error %d\n", res_resubmit);
-
-                ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
-                if (ret < 0)
-                    return ret;
-            }
-        } else if (ctx->delayed_drain) { // try to resubmit drain
-            res = ctx->encoder->pVtbl->Drain(ctx->encoder);
-            if (res != AMF_INPUT_FULL) {
-                ctx->delayed_drain = 0;
-                ctx->eof = 1; // drain started
-                AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated Drain() failed with error %d\n", res);
-            } else {
-                av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed drain submission got AMF_INPUT_FULL- should not happen\n");
-            }
-        }
+            if (ctx->delayed_surface != NULL) { // try to resubmit frame
+                if (ctx->delayed_surface->pVtbl->HasProperty(ctx->delayed_surface, L"av_frame_hdrmeta")) {
+                    AMFBuffer * hdrmeta_buffer = NULL;
+                    res = amf_get_property_buffer((AMFData *)ctx->delayed_surface, L"av_frame_hdrmeta", &hdrmeta_buffer);
+                    AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
+                    switch (avctx->codec->id) {
+                    case AV_CODEC_ID_H264:
+                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_INPUT_HDR_METADATA, hdrmeta_buffer); break;
+                    case AV_CODEC_ID_HEVC:
+                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_INPUT_HDR_METADATA, hdrmeta_buffer); break;
+                    }
+                    hdrmeta_buffer->pVtbl->Release(hdrmeta_buffer);
+                }
+                res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)ctx->delayed_surface);
+                if (res != AMF_INPUT_FULL) {
+                    int64_t pts = ctx->delayed_surface->pVtbl->GetPts(ctx->delayed_surface);
+                    ctx->delayed_surface->pVtbl->Release(ctx->delayed_surface);
+                    ctx->delayed_surface = NULL;
+                    av_frame_unref(ctx->delayed_frame);
+                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated SubmitInput() failed with error %d\n", res);
 
         if (query_output_data_flag == 0) {
             if (res_resubmit == AMF_INPUT_FULL || ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
