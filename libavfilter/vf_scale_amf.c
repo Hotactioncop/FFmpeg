@@ -84,9 +84,7 @@ typedef struct AMFScaleContext {
     AVBufferRef         *hwframes_out_ref;
     AVBufferRef         *hwdevice_ref;
 
-    AMFContext          *context;
-    AMFFactory          *factory;
-
+    AVBufferRef        *amf_device_ctx_internal;
 } AMFScaleContext;
 
 
@@ -172,6 +170,7 @@ static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pS
 static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *frame, AMFSurface** ppSurface)
 {
     AMFScaleContext *ctx = avctx->priv;
+    AVAMFDeviceContextInternal *internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
     AMFSurface *surface;
     AMF_RESULT  res;
     int hw_surface = 0;
@@ -185,7 +184,7 @@ static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *fram
             int index = (intptr_t)frame->data[1]; // index is a slice in texture array is - set to tell AMF which slice to use
             texture->lpVtbl->SetPrivateData(texture, &AMFTextureArrayIndexGUID, sizeof(index), &index);
 
-            res = ctx->context->pVtbl->CreateSurfaceFromDX11Native(ctx->context, texture, &surface, NULL); // wrap to AMF surface
+            res = internal->context->pVtbl->CreateSurfaceFromDX11Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
             AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX11Native() failed  with error %d\n", res);
             hw_surface = 1;
         }
@@ -196,7 +195,7 @@ static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *fram
         {
             IDirect3DSurface9 *texture = (IDirect3DSurface9 *)frame->data[3]; // actual texture
 
-            res = ctx->context->pVtbl->CreateSurfaceFromDX9Native(ctx->context, texture, &surface, NULL); // wrap to AMF surface
+            res = internal->context->pVtbl->CreateSurfaceFromDX9Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
             AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX9Native() failed  with error %d\n", res);
             hw_surface = 1;
         }
@@ -205,7 +204,7 @@ static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *fram
     default:
         {
             AMF_SURFACE_FORMAT amf_fmt = amf_av_to_amf_format(frame->format);
-            res = ctx->context->pVtbl->AllocSurface(ctx->context, AMF_MEMORY_HOST, amf_fmt, frame->width, frame->height, &surface);
+            res = internal->context->pVtbl->AllocSurface(internal->context, AMF_MEMORY_HOST, amf_fmt, frame->width, frame->height, &surface);
             AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
             amf_copy_surface(avctx, frame, surface);
         }
@@ -341,6 +340,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AVFilterContext *avctx = outlink->src;
     AVFilterLink   *inlink = avctx->inputs[0];
     AMFScaleContext  *ctx = avctx->priv;
+    AVAMFDeviceContextInternal * internal = NULL;
     AVAMFDeviceContext *amf_ctx;
     AVHWFramesContext *hwframes_out;
     enum AVPixelFormat pix_fmt_in;
@@ -361,7 +361,10 @@ static int amf_scale_config_output(AVFilterLink *outlink)
 
     if (inlink->hw_frames_ctx) {
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)inlink->hw_frames_ctx->data;
-
+        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
+            AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+        }
         if (amf_av_to_amf_format(frames_ctx->sw_format) == AMF_SURFACE_UNKNOWN) {
             av_log(avctx, AV_LOG_ERROR, "Format of input frames context (%s) is not supported by AMF.\n",
                    av_get_pix_fmt_name(frames_ctx->sw_format));
@@ -389,7 +392,13 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         err = av_hwdevice_ctx_create_derived(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, avctx->hw_device_ctx, 0);
         if (err < 0)
             return err;
-
+        AVHWDeviceContext   *hwdev_ctx;
+        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
+        {
+            AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+        }
         ctx->hwdevice_ref = av_buffer_ref(avctx->hw_device_ctx);
         if (!ctx->hwdevice_ref)
             return AVERROR(ENOMEM);
@@ -404,9 +413,12 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         pix_fmt_in = inlink->format;
 
     } else {
-        err = av_hwdevice_ctx_create(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, NULL, NULL, 0);
-        if (err < 0)
-            return err;
+        AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
+        ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
+                                                amf_context_internal_free, NULL, 0);
+        if ((res == amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+            return res;
+        }
         ctx->hwframes_out_ref = av_hwframe_ctx_alloc(ctx->amf_device_ref);
         if (!ctx->hwframes_out_ref)
             return AVERROR(ENOMEM);
@@ -436,11 +448,8 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         return AVERROR(ENOMEM);
     }
 
-    amf_ctx = ((AVHWDeviceContext*)ctx->amf_device_ref->data)->hwctx;
-    ctx->context = amf_ctx->context;
-    ctx->factory = amf_ctx->factory;
-
-    res = ctx->factory->pVtbl->CreateComponent(ctx->factory, ctx->context, AMFVideoConverter, &ctx->converter);
+    internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
+    res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFVideoConverter, &ctx->converter);
     AMFAV_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFVideoConverter, res);
 
     AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_OUTPUT_FORMAT, (amf_int32)amf_av_to_amf_format(hwframes_out->sw_format));
