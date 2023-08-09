@@ -29,6 +29,7 @@
 typedef struct AmfTraceWriter {
     AMFTraceWriterVtbl  *vtbl;
     void                *avctx;
+    void                *avcl;
 } AmfTraceWriter;
 
 /**
