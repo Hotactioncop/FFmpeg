@@ -301,6 +301,209 @@ static int amf_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
 static void amf_device_uninit(AVHWDeviceContext *device_ctx)
 {
     AVAMFDeviceContext      *amf_ctx = device_ctx->hwctx;
+    av_buffer_unref(&amf_ctx->internal);
+}
+
+static int amf_device_init(AVHWDeviceContext *ctx)
+{
+    AVAMFDeviceContext *amf_ctx = ctx->hwctx;
+    return amf_context_init((AVAMFDeviceContextInternal * )amf_ctx->internal->data, ctx);
+}
+
+static int amf_device_create(AVHWDeviceContext *device_ctx,
+                              const char *device,
+                              AVDictionary *opts, int flags)
+{
+    AVAMFDeviceContext        *ctx = device_ctx->hwctx;
+    AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
+    ctx->internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
+                                                    amf_context_internal_free, NULL, 0);
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )ctx->internal->data;
+    int ret;
+    if ((ret = amf_load_library(internal, device_ctx)) == 0) {
+        if ((ret = amf_create_context(internal, device_ctx, "", opts, flags)) == 0){
+            return 0;
+        }
+    }
+    amf_device_uninit(device_ctx);
+    return ret;
+}
+ 
+static int amf_device_derive(AVHWDeviceContext *device_ctx,
+                              AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
+                              int flags)
+{
+    AVAMFDeviceContext        *ctx = device_ctx->hwctx;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )ctx->internal->data;
+    int ret;
+
+    ret = amf_device_create(device_ctx, "", opts, flags);
+    if(ret < 0)
+        return ret;
+
+    return amf_context_derive(internal, child_device_ctx, opts, flags);
+}
+
+#if CONFIG_DXVA2
+static int amf_init_from_dxva2_device(AVAMFDeviceContextInternal * internal, AVDXVA2DeviceContext *hwctx)
+{
+    IDirect3DDevice9    *device;
+    HANDLE              device_handle;
+    HRESULT             hr;
+    AMF_RESULT          res;
+    int ret;
+
+    hr = IDirect3DDeviceManager9_OpenDeviceHandle(hwctx->devmgr, &device_handle);
+    if (FAILED(hr)) {
+        av_log(hwctx, AV_LOG_ERROR, "Failed to open device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
+        return AVERROR_EXTERNAL;
+    }
+
+    hr = IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, device_handle, &device, FALSE);
+    if (SUCCEEDED(hr)) {
+        IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, device_handle, FALSE);
+        ret = 0;
+    } else {
+        av_log(hwctx, AV_LOG_ERROR, "Failed to lock device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
+        ret = AVERROR_EXTERNAL;
+    }
+
+
+    IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, device_handle);
+
+    if (ret < 0)
+        return ret;
+
+    res = internal->context->pVtbl->InitDX9(internal->context, device);
+
+    IDirect3DDevice9_Release(device);
+
+    if (res != AMF_OK) {
+        if (res == AMF_NOT_SUPPORTED)
+            av_log(hwctx, AV_LOG_ERROR, "AMF via D3D9 is not supported on the given device.\n");
+        else
+            av_log(hwctx, AV_LOG_ERROR, "AMF failed to initialise on given D3D9 device: %d.\n", res);
+        return AVERROR(ENODEV);
+    }
+
+    return 0;
+}
+#endif
+
+#if CONFIG_D3D11VA
+static int amf_init_from_d3d11_device(AVAMFDeviceContextInternal* internal, AVD3D11VADeviceContext *hwctx)
+{
+    AMF_RESULT res;
+    res = internal->context->pVtbl->InitDX11(internal->context, hwctx->device, AMF_DX11_1);
+    if (res != AMF_OK) {
+        if (res == AMF_NOT_SUPPORTED)
+            av_log(hwctx, AV_LOG_ERROR, "AMF via D3D11 is not supported on the given device.\n");
+        else
+            av_log(hwctx, AV_LOG_ERROR, "AMF failed to initialise on the given D3D11 device: %d.\n", res);
+        return AVERROR(ENODEV);
+    }
+
+    return 0;
+}
+#endif
+
+int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
+{
+     AMFContext1 *context1 = NULL;
+     AMF_RESULT res;
+
+    res = internal->context->pVtbl->InitDX11(internal->context, NULL, AMF_DX11_1);
+    if (res == AMF_OK) {
+        av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D11.\n");
+    } else {
+        res = internal->context->pVtbl->InitDX9(internal->context, NULL);
+        if (res == AMF_OK) {
+            av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D9.\n");
+        } else {
+            AMFGuid guid = IID_AMFContext1();
+            res = internal->context->pVtbl->QueryInterface(internal->context, &guid, (void**)&context1);
+            AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "CreateContext1() failed with error %d\n", res);
+
+            res = context1->pVtbl->InitVulkan(context1, NULL);
+            context1->pVtbl->Release(context1);
+            if (res != AMF_OK) {
+                if (res == AMF_NOT_SUPPORTED)
+                    av_log(avcl, AV_LOG_ERROR, "AMF via Vulkan is not supported on the given device.\n");
+                 else
+                    av_log(avcl, AV_LOG_ERROR, "AMF failed to initialise on the given Vulkan device: %d.\n", res);
+                 return AVERROR(ENOSYS);
+            }
+            av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via Vulkan.\n");
+         }
+     }
+     return 0;
+}
+int amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl)
+{
+    AMFInit_Fn         init_fun;
+    AMFQueryVersion_Fn version_fun;
+    AMF_RESULT         res;
+
+    internal->library = dlopen(AMF_DLL_NAMEA, RTLD_NOW | RTLD_LOCAL);
+    AMF_RETURN_IF_FALSE(avcl, internal->library != NULL,
+        AVERROR_UNKNOWN, "DLL %s failed to open\n", AMF_DLL_NAMEA);
+
+    init_fun = (AMFInit_Fn)dlsym(internal->library, AMF_INIT_FUNCTION_NAME);
+    AMF_RETURN_IF_FALSE(avcl, init_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_INIT_FUNCTION_NAME);
+
+    version_fun = (AMFQueryVersion_Fn)dlsym(internal->library, AMF_QUERY_VERSION_FUNCTION_NAME);
+    AMF_RETURN_IF_FALSE(avcl, version_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_QUERY_VERSION_FUNCTION_NAME);
+
+    res = version_fun(&internal->version);
+    AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_QUERY_VERSION_FUNCTION_NAME, res);
+    res = init_fun(AMF_FULL_VERSION, &internal->factory);
+    AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_INIT_FUNCTION_NAME, res);
+    res = internal->factory->pVtbl->GetTrace(internal->factory, &internal->trace);
+    AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "GetTrace() failed with error %d\n", res);
+    res = internal->factory->pVtbl->GetDebug(internal->factory, &internal->debug);
+    AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "GetDebug() failed with error %d\n", res);
+    return 0;
+}
+
+int amf_create_context(  AVAMFDeviceContextInternal * internal,
+                                void* avcl,
+                                const char *device,
+                                AVDictionary *opts, int flags)
+{
+    AMF_RESULT         res;
+
+    internal->trace->pVtbl->EnableWriter(internal->trace, AMF_TRACE_WRITER_CONSOLE, 0);
+    internal->trace->pVtbl->SetGlobalLevel(internal->trace, AMF_TRACE_TRACE);
+
+     // connect AMF logger to av_log
+    amf_trace_writer.avctx = avcl;
+    internal->trace->pVtbl->RegisterWriter(internal->trace, FFMPEG_AMF_WRITER_ID, (AMFTraceWriter*)&amf_trace_writer, 1);
+    internal->trace->pVtbl->SetWriterLevel(internal->trace, FFMPEG_AMF_WRITER_ID, AMF_TRACE_TRACE);
+
+    res = internal->factory->pVtbl->CreateContext(internal->factory, &internal->context);
+    AMF_RETURN_IF_FALSE(avcl, res == AMF_OK, AVERROR_UNKNOWN, "CreateContext() failed with error %d\n", res);
+
+    return 0;
+}
+
+int amf_context_internal_create(AVAMFDeviceContextInternal * internal,
+                                void* avcl,
+                                const char *device,
+                                AVDictionary *opts, int flags)
+{
+    int ret;
+    if ((ret = amf_load_library(internal, avcl)) == 0) {
+        if ((ret = amf_create_context(internal, avcl, "", opts, flags)) == 0){
+            return 0;
+        }
+    }
+    amf_context_internal_free(0, (uint8_t *)internal);
+    return ret;
+}
+
+int amf_context_internal_free(void *opaque, uint8_t *data)
+{
+    AVAMFDeviceContextInternal *amf_ctx = (AVAMFDeviceContextInternal *)data;
     if (amf_ctx->context) {
         amf_ctx->context->pVtbl->Terminate(amf_ctx->context);
         amf_ctx->context->pVtbl->Release(amf_ctx->context);
@@ -318,157 +521,14 @@ static void amf_device_uninit(AVHWDeviceContext *device_ctx)
 
     amf_ctx->debug = NULL;
     amf_ctx->version = 0;
-}
-
-static int amf_device_init(AVHWDeviceContext *ctx)
-{
-    AVAMFDeviceContext *amf_ctx = ctx->hwctx;
-    AMFContext1 *context1 = NULL;
-    AMF_RESULT res;
-
-    res = amf_ctx->context->pVtbl->InitDX11(amf_ctx->context, NULL, AMF_DX11_1);
-    if (res == AMF_OK) {
-        av_log(ctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D11.\n");
-    } else {
-        res = amf_ctx->context->pVtbl->InitDX9(amf_ctx->context, NULL);
-        if (res == AMF_OK) {
-            av_log(ctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D9.\n");
-        } else {
-            AMFGuid guid = IID_AMFContext1();
-            res = amf_ctx->context->pVtbl->QueryInterface(amf_ctx->context, &guid, (void**)&context1);
-            AMF_RETURN_IF_FALSE(amf_ctx, res == AMF_OK, AVERROR_UNKNOWN, "CreateContext1() failed with error %d\n", res);
-
-            res = context1->pVtbl->InitVulkan(context1, NULL);
-            context1->pVtbl->Release(context1);
-            if (res != AMF_OK) {
-                if (res == AMF_NOT_SUPPORTED)
-                    av_log(ctx, AV_LOG_ERROR, "AMF via Vulkan is not supported on the given device.\n");
-                else
-                    av_log(ctx, AV_LOG_ERROR, "AMF failed to initialise on the given Vulkan device: %d.\n", res);
-                return AVERROR(ENOSYS);
-            }
-            av_log(ctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via Vulkan.\n");
-        }
-    }
+    av_free(amf_ctx);
     return 0;
 }
 
-static int amf_device_create(AVHWDeviceContext *device_ctx,
-                              const char *device,
-                              AVDictionary *opts, int flags)
+int amf_context_derive(AVAMFDeviceContextInternal * internal,
+                               AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
+                               int flags)
 {
-    AVAMFDeviceContext        *ctx = device_ctx->hwctx;
-    AMFInit_Fn         init_fun;
-    AMFQueryVersion_Fn version_fun;
-    AMF_RESULT         res;
-
-    ctx->library = dlopen(AMF_DLL_NAMEA, RTLD_NOW | RTLD_LOCAL);
-    AMF_RETURN_IF_FALSE(ctx, ctx->library != NULL,
-        AVERROR_UNKNOWN, "DLL %s failed to open\n", AMF_DLL_NAMEA);
-
-    init_fun = (AMFInit_Fn)dlsym(ctx->library, AMF_INIT_FUNCTION_NAME);
-    AMF_RETURN_IF_FALSE(ctx, init_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_INIT_FUNCTION_NAME);
-
-    version_fun = (AMFQueryVersion_Fn)dlsym(ctx->library, AMF_QUERY_VERSION_FUNCTION_NAME);
-    AMF_RETURN_IF_FALSE(ctx, version_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_QUERY_VERSION_FUNCTION_NAME);
-
-    res = version_fun(&ctx->version);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_QUERY_VERSION_FUNCTION_NAME, res);
-    res = init_fun(AMF_FULL_VERSION, &ctx->factory);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_INIT_FUNCTION_NAME, res);
-    res = ctx->factory->pVtbl->GetTrace(ctx->factory, &ctx->trace);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetTrace() failed with error %d\n", res);
-    res = ctx->factory->pVtbl->GetDebug(ctx->factory, &ctx->debug);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetDebug() failed with error %d\n", res);
-
-    ctx->trace->pVtbl->EnableWriter(ctx->trace, AMF_TRACE_WRITER_CONSOLE, 0);
-    ctx->trace->pVtbl->SetGlobalLevel(ctx->trace, AMF_TRACE_TRACE);
-
-    // connect AMF logger to av_log
-    amf_trace_writer.avctx = ctx;
-    ctx->trace->pVtbl->RegisterWriter(ctx->trace, FFMPEG_AMF_WRITER_ID, (AMFTraceWriter*)&amf_trace_writer, 1);
-    ctx->trace->pVtbl->SetWriterLevel(ctx->trace, FFMPEG_AMF_WRITER_ID, AMF_TRACE_TRACE);
-
-    res = ctx->factory->pVtbl->CreateContext(ctx->factory, &ctx->context);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "CreateContext() failed with error %d\n", res);
-
-    return 0;
-}
-
-#if CONFIG_D3D11VA
-static int amf_init_from_d3d11_device(AVHWDeviceContext *avctx, AVD3D11VADeviceContext *hwctx)
-{
-    AVAMFDeviceContext *ctx = avctx->hwctx;
-    AMF_RESULT res;
-
-    res = ctx->context->pVtbl->InitDX11(ctx->context, hwctx->device, AMF_DX11_1);
-    if (res != AMF_OK) {
-        if (res == AMF_NOT_SUPPORTED)
-            av_log(avctx, AV_LOG_ERROR, "AMF via D3D11 is not supported on the given device.\n");
-        else
-            av_log(avctx, AV_LOG_ERROR, "AMF failed to initialise on the given D3D11 device: %d.\n", res);
-        return AVERROR(ENODEV);
-    }
-
-    return 0;
-}
-#endif
-
-#if CONFIG_DXVA2
-static int amf_init_from_dxva2_device(AVHWDeviceContext *avctx, AVDXVA2DeviceContext *hwctx)
-{
-    AVAMFDeviceContext *ctx = avctx->hwctx;
-    HANDLE device_handle;
-    IDirect3DDevice9 *device;
-    HRESULT hr;
-    AMF_RESULT res;
-    int ret;
-
-    hr = IDirect3DDeviceManager9_OpenDeviceHandle(hwctx->devmgr, &device_handle);
-    if (FAILED(hr)) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to open device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
-        return AVERROR_EXTERNAL;
-    }
-
-    hr = IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, device_handle, &device, FALSE);
-    if (SUCCEEDED(hr)) {
-        IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, device_handle, FALSE);
-        ret = 0;
-    } else {
-        av_log(avctx, AV_LOG_ERROR, "Failed to lock device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
-        ret = AVERROR_EXTERNAL;
-    }
-
-    IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, device_handle);
-
-    if (ret < 0)
-        return ret;
-
-    res = ctx->context->pVtbl->InitDX9(ctx->context, device);
-
-    IDirect3DDevice9_Release(device);
-
-    if (res != AMF_OK) {
-        if (res == AMF_NOT_SUPPORTED)
-            av_log(avctx, AV_LOG_ERROR, "AMF via D3D9 is not supported on the given device.\n");
-        else
-            av_log(avctx, AV_LOG_ERROR, "AMF failed to initialise on given D3D9 device: %d.\n", res);
-        return AVERROR(ENODEV);
-    }
-
-    return 0;
-}
-#endif
-
-static int amf_device_derive(AVHWDeviceContext *device_ctx,
-                              AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
-                              int flags)
-{
-    int err;
-
-    err = amf_device_create(device_ctx, "", opts, flags);
-    if(err < 0)
-        return err;
 
     switch (child_device_ctx->type) {
 
@@ -476,7 +536,7 @@ static int amf_device_derive(AVHWDeviceContext *device_ctx,
     case AV_HWDEVICE_TYPE_DXVA2:
         {
             AVDXVA2DeviceContext *child_device_hwctx = child_device_ctx->hwctx;
-            return amf_init_from_dxva2_device(device_ctx, child_device_hwctx);
+            return amf_init_from_dxva2_device(internal, child_device_hwctx);
         }
         break;
 #endif
@@ -485,19 +545,17 @@ static int amf_device_derive(AVHWDeviceContext *device_ctx,
     case AV_HWDEVICE_TYPE_D3D11VA:
         {
             AVD3D11VADeviceContext *child_device_hwctx = child_device_ctx->hwctx;
-            return amf_init_from_d3d11_device(device_ctx, child_device_hwctx);
+            return amf_init_from_d3d11_device(internal, child_device_hwctx);
         }
         break;
 #endif
     default:
         {
-            av_log(device_ctx, AV_LOG_ERROR, "AMF initialisation from a %s device is not supported.\n",
+            av_log(child_device_ctx, AV_LOG_ERROR, "AMF initialisation from a %s device is not supported.\n",
                 av_hwdevice_get_type_name(child_device_ctx->type));
-            amf_device_uninit(device_ctx);
             return AVERROR(ENOSYS);
         }
     }
-    amf_device_uninit(device_ctx);
     return 0;
 }
 

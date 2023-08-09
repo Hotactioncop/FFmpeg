@@ -39,9 +39,7 @@
 typedef struct AvAmfDecoderContext {
     AVClass            *avclass;
 
-    AMFContext         *context;
-    int                 uses_wh_context;
-    AMFFactory         *factory;
+    AVBufferRef        *amf_device_ctx_internal;
     AVBufferRef        *amf_device_ctx;
 
     //decoder
@@ -57,10 +55,6 @@ typedef struct AvAmfDecoderContext {
     // shift dts back by max_b_frames in timing
     AVFifoBuffer       *timestamp_list;
     int64_t             dts_delay;
-
-    amf_handle          library; ///< handle to DLL library
-    AMFDebug           *debug;   ///< pointer to AMF debug interface
-    AMFTrace           *trace;   ///< pointer to AMF trace interface
 
     amf_uint64          version; ///< version of AMF runtime
     // common encoder option options

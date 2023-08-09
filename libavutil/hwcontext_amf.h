@@ -24,6 +24,9 @@
 #include <AMF/core/Trace.h>
 #include "pixfmt.h"
 
+#include "libavformat/avformat.h"
+#include "libavutil/hwcontext.h"
+
 #define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
 
 typedef struct AmfTraceWriter {
@@ -32,11 +35,7 @@ typedef struct AmfTraceWriter {
     void                *avcl;
 } AmfTraceWriter;
 
-/**
- * This struct is allocated as AVHWDeviceContext.hwctx
- */
-
-typedef struct AVAMFDeviceContext {
+typedef struct AVAMFDeviceContextInternal {
     amf_handle          library; ///< handle to DLL library
     AMFFactory         *factory; ///< pointer to AMF factory
     AMFDebug           *debug;   ///< pointer to AMF debug interface
@@ -45,6 +44,14 @@ typedef struct AVAMFDeviceContext {
     amf_uint64          version; ///< version of AMF runtime
     AMFContext         *context; ///< AMF context
 
+} AVAMFDeviceContextInternal;
+
+/**
+ * This struct is allocated as AVHWDeviceContext.hwctx
+ */
+
+typedef struct AVAMFDeviceContext {
+    AVBufferRef        *internal;
 } AVAMFDeviceContext;
 
 /**
@@ -75,4 +82,19 @@ enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt);
 enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt);
 extern AmfTraceWriter amf_trace_writer;
 
-#endif /* AVUTIL_HWCONTEXT_CUDA_H */
+int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl);
+int amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl);
+int amf_create_context(  AVAMFDeviceContextInternal * internal,
+                                void* avcl,
+                                const char *device,
+                                AVDictionary *opts, int flags);
+int amf_context_internal_create(AVAMFDeviceContextInternal * internal,
+                                void* avcl,
+                                const char *device,
+                                AVDictionary *opts, int flags);
+int amf_context_internal_free(void *opaque, uint8_t *data);
+int amf_context_derive(AVAMFDeviceContextInternal * internal,
+                              AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
+                              int flags);
+
+#endif /* AVUTIL_HWCONTEXT_AMF_H */

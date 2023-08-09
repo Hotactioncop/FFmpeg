@@ -29,6 +29,7 @@
 #define COBJMACROS
 #include "libavutil/hwcontext_dxva2.h"
 #endif
+#include "libavutil/hwcontext_amf.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/time.h"
@@ -114,36 +115,13 @@ const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_NONE
 };
 
-static int amf_init_context(AVCodecContext *avctx)
-{
-    AmfContext        *ctx = avctx->priv_data;
-    ctx->delayed_frame = av_frame_alloc();
-    ctx->uses_wh_context = 0;
-    if (!ctx->delayed_frame) {
-        return AVERROR(ENOMEM);
-    }
-    if (amf_trace_writer.avctx == NULL)
-        amf_trace_writer.avctx = avctx;
-    // hardcoded to current HW queue size - will auto-realloc if too small
-    ctx->timestamp_list = av_fifo_alloc2(avctx->max_b_frames + 16, sizeof(int64_t),
-                                         AV_FIFO_FLAG_AUTO_GROW);
-    if (!ctx->timestamp_list) {
-        return AVERROR(ENOMEM);
-    }
-    ctx->dts_delay = 0;
-
-    ctx->hwsurfaces_in_queue = 0;
-    ctx->hwsurfaces_in_queue_max = 16;
-
-    return 0;
-}
-
 static int amf_init_encoder(AVCodecContext *avctx)
 {
     AmfContext        *ctx = avctx->priv_data;
     const wchar_t     *codec_id = NULL;
     AMF_RESULT         res;
     enum AVPixelFormat pix_fmt;
+    AVAMFDeviceContextInternal* internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
 
     switch (avctx->codec->id) {
         case AV_CODEC_ID_H264:
@@ -165,37 +143,18 @@ static int amf_init_encoder(AVCodecContext *avctx)
     else
         pix_fmt = avctx->pix_fmt;
 
-    if (avctx->pix_fmt == AV_PIX_FMT_AMF || avctx->hw_frames_ctx || avctx->hw_device_ctx) {
-        AVHWFramesContext   *frames_ctx;
-        AVHWDeviceContext   *hwdev_ctx;
-        AVAMFDeviceContext *amf_hwctx = NULL;
-        if (avctx->hw_frames_ctx) {
-            frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-            if (frames_ctx->format == AV_PIX_FMT_AMF)
-                amf_hwctx = frames_ctx->device_ctx->hwctx;
-        } else if  (avctx->hw_device_ctx) {
-            hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-            if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
-                amf_hwctx = hwdev_ctx->hwctx;
-        } else {
-            return AVERROR(EINVAL);
-        }
-        ctx->uses_wh_context = 1;
-        // FiXME: this is a hack to get the correct format for AMF HW context
-        if (avctx->pix_fmt != AV_PIX_FMT_AMF)
-            ctx->format = amf_av_to_amf_format(pix_fmt);
-        else
-            ctx->format = AMF_SURFACE_NV12;
-        AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
-                        "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
+     // FiXME: this is a hack to get the correct format for AMF HW context
+    if (avctx->pix_fmt != AV_PIX_FMT_AMF)
+        ctx->format = amf_av_to_amf_format(pix_fmt);
+    else
+        ctx->format = AMF_SURFACE_NV12;
 
-        res = amf_hwctx->factory->pVtbl->CreateComponent(amf_hwctx->factory, amf_hwctx->context, codec_id, &ctx->encoder);
-        ctx->context = amf_hwctx->context;
-        AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_ENCODER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", codec_id, res);
-        return 0;
-    }
+    AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
+                    "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
 
-    return AVERROR(EINVAL);
+    res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, codec_id, &ctx->encoder);
+    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_ENCODER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", codec_id, res);
+    return 0;
 }
 
 int av_cold ff_amf_encode_close(AVCodecContext *avctx)
@@ -213,19 +172,49 @@ int av_cold ff_amf_encode_close(AVCodecContext *avctx)
         ctx->encoder = NULL;
     }
 
-    if (ctx->context && ctx->uses_wh_context != 1) {
-        ctx->context->pVtbl->Terminate(ctx->context);
-        ctx->context->pVtbl->Release(ctx->context);
-        ctx->context = NULL;
-    }
     av_buffer_unref(&ctx->hw_device_ctx);
     av_buffer_unref(&ctx->hw_frames_ctx);
-
+    av_buffer_unref(&ctx->amf_device_ctx_internal);
 
     av_frame_free(&ctx->delayed_frame);
     av_fifo_freep2(&ctx->timestamp_list);
 
     return 0;
+}
+
+static int amf_init_encoder_context(AVCodecContext *avctx)
+{
+    AmfContext *ctx = avctx->priv_data;
+    AMFContext1 *context1 = NULL;
+    int ret;
+
+    if (avctx->hw_frames_ctx) {
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
+        if (ret < 0)
+            return ret;
+        ctx->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
+        if (!ctx->hw_frames_ctx)
+            return AVERROR(ENOMEM);
+    }
+    else if (avctx->hw_device_ctx) {
+        AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
+        if (ret < 0)
+            return ret;
+        ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
+        if (!ctx->hw_device_ctx)
+            return AVERROR(ENOMEM);
+
+    } else {
+        ret = amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+
+    return ret;
 }
 
 static int amf_copy_surface(AVCodecContext *avctx, const AVFrame *frame,
@@ -316,12 +305,56 @@ static int amf_copy_buffer(AVCodecContext *avctx, AVPacket *pkt, AMFBuffer *buff
 int ff_amf_encode_init(AVCodecContext *avctx)
 {
     int ret;
+    AmfContext *ctx = avctx->priv_data;
+    ctx->delayed_frame = av_frame_alloc();
+    if (!ctx->delayed_frame) {
+        return AVERROR(ENOMEM);
+    }
+    if (amf_trace_writer.avctx == NULL)
+        amf_trace_writer.avctx = avctx;
+    // hardcoded to current HW queue size - will auto-realloc if too small
+    ctx->timestamp_list = av_fifo_alloc2(avctx->max_b_frames + 16, sizeof(int64_t),
+                                         AV_FIFO_FLAG_AUTO_GROW);
+    if (!ctx->timestamp_list) {
+        return AVERROR(ENOMEM);
+    }
+    ctx->dts_delay = 0;
 
-    if ((ret = amf_init_context(avctx)) == 0) {
-        if ((ret = amf_init_encoder(avctx)) == 0) {
-            return 0;
+    ctx->hwsurfaces_in_queue = 0;
+    ctx->hwsurfaces_in_queue_max = 16;
+
+    if (avctx->hw_frames_ctx){
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
+            AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+         }
+     }
+    else if  (avctx->hw_device_ctx) {
+        AVHWDeviceContext   *hwdev_ctx;
+        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
+        {
+            AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+        }
+    }  else {
+        AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
+        ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
+                                                amf_context_internal_free, NULL, 0);
+        if ((ret = amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+            ff_amf_encode_close(avctx);
+            return ret;
+        }
+        if ((ret = amf_init_encoder_context(avctx)) != 0) {
+            ff_amf_encode_close(avctx);
+            return ret;
         }
     }
+    if ((ret = amf_init_encoder(avctx)) == 0) {
+        return 0;
+    }
+
     ff_amf_encode_close(avctx);
     return ret;
 }
@@ -399,6 +432,7 @@ static void amf_release_buffer_with_frame_ref(AMFBuffer *frame_ref_storage_buffe
 int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 {
     AmfContext *ctx = avctx->priv_data;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
     AMFSurface *surface;
     AMF_RESULT  res;
     int         ret;
@@ -451,7 +485,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 
                 texture->lpVtbl->SetPrivateData(texture, &AMFTextureArrayIndexGUID, sizeof(index), &index);
 
-                res = ctx->context->pVtbl->CreateSurfaceFromDX11Native(ctx->context, texture, &surface, NULL); // wrap to AMF surface
+                res = internal->context->pVtbl->CreateSurfaceFromDX11Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
                 AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX11Native() failed  with error %d\n", res);
 
                 hw_surface = 1;
@@ -463,7 +497,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             {
                 IDirect3DSurface9 *texture = (IDirect3DSurface9 *)frame->data[3]; // actual texture
 
-                res = ctx->context->pVtbl->CreateSurfaceFromDX9Native(ctx->context, texture, &surface, NULL); // wrap to AMF surface
+                res = internal->context->pVtbl->CreateSurfaceFromDX9Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
                 AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX9Native() failed  with error %d\n", res);
 
                 hw_surface = 1;
@@ -478,7 +512,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             break;
         default:
             {
-                res = ctx->context->pVtbl->AllocSurface(ctx->context, AMF_MEMORY_HOST, ctx->format, avctx->width, avctx->height, &surface);
+                res = internal->context->pVtbl->AllocSurface(internal->context, AMF_MEMORY_HOST, ctx->format, avctx->width, avctx->height, &surface);
                 AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
                 amf_copy_surface(avctx, frame, surface);
             }
@@ -491,7 +525,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             // input HW surfaces can be vertically aligned by 16; tell AMF the real size
             surface->pVtbl->SetCrop(surface, 0, 0, frame->width, frame->height);
 
-            frame_ref_storage_buffer = amf_create_buffer_with_frame_ref(frame, ctx->context);
+            frame_ref_storage_buffer = amf_create_buffer_with_frame_ref(frame, internal->context);
             AMF_RETURN_IF_FALSE(ctx, frame_ref_storage_buffer != NULL, AVERROR(ENOMEM), "create_buffer_with_frame_ref() returned NULL\n");
 
             res = amf_set_property_buffer(surface, L"av_frame_ref", frame_ref_storage_buffer);
@@ -504,7 +538,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         // HDR10 metadata
         if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
             AMFBuffer * hdrmeta_buffer = NULL;
-            res = ctx->context->pVtbl->AllocBuffer(ctx->context, AMF_MEMORY_HOST, sizeof(AMFHDRMetadata), &hdrmeta_buffer);
+            res = internal->context->pVtbl->AllocBuffer(internal->context, AMF_MEMORY_HOST, sizeof(AMFHDRMetadata), &hdrmeta_buffer);
             if (res == AMF_OK) {
                 AMFHDRMetadata * hdrmeta = (AMFHDRMetadata*)hdrmeta_buffer->pVtbl->GetNative(hdrmeta_buffer);
                 if (amf_save_hdr_metadata(avctx, frame, hdrmeta) == 0) {

@@ -90,38 +90,11 @@ static void amf_free_amfsurface(void *opaque, uint8_t *data)
     //surface->pVtbl->Release(surface);
 }
 
-static int amf_load_library(AVCodecContext *avctx)
-{
-    AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMFInit_Fn          init_fun;
-    AMFQueryVersion_Fn  version_fun;
-    AMF_RESULT          res;
-
-    ctx->library = dlopen(AMF_DLL_NAMEA, RTLD_NOW | RTLD_LOCAL);
-    AMF_RETURN_IF_FALSE(ctx, ctx->library != NULL,
-        AVERROR_UNKNOWN, "DLL %s failed to open\n", AMF_DLL_NAMEA);
-
-    init_fun = (AMFInit_Fn)dlsym(ctx->library, AMF_INIT_FUNCTION_NAME);
-    AMF_RETURN_IF_FALSE(ctx, init_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_INIT_FUNCTION_NAME);
-
-    version_fun = (AMFQueryVersion_Fn)dlsym(ctx->library, AMF_QUERY_VERSION_FUNCTION_NAME);
-    AMF_RETURN_IF_FALSE(ctx, version_fun != NULL, AVERROR_UNKNOWN, "DLL %s failed to find function %s\n", AMF_DLL_NAMEA, AMF_QUERY_VERSION_FUNCTION_NAME);
-
-    res = version_fun(&ctx->version);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_QUERY_VERSION_FUNCTION_NAME, res);
-    res = init_fun(AMF_FULL_VERSION, &ctx->factory);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "%s failed with error %d\n", AMF_INIT_FUNCTION_NAME, res);
-    res = ctx->factory->pVtbl->GetTrace(ctx->factory, &ctx->trace);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetTrace() failed with error %d\n", res);
-    res = ctx->factory->pVtbl->GetDebug(ctx->factory, &ctx->debug);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetDebug() failed with error %d\n", res);
-    return 0;
-}
-
 static int amf_init_decoder(AVCodecContext *avctx)
 {
     enum AMF_SURFACE_FORMAT output_format = AMF_SURFACE_UNKNOWN;
     AvAmfDecoderContext     *ctx = avctx->priv_data;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
     const wchar_t           *codec_id = NULL;
     AMF_RESULT              res;
     AMFBuffer               *buffer;
@@ -155,8 +128,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
     }
     AMF_RETURN_IF_FALSE(ctx, codec_id != NULL, AVERROR(EINVAL), "Codec %d is not supported\n", avctx->codec->id);
 
-
-    res = ctx->factory->pVtbl->CreateComponent(ctx->factory, ctx->context, codec_id, &ctx->decoder);
+    res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, codec_id, &ctx->decoder);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_ENCODER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", codec_id, res);
 
     // Color Metadata
@@ -210,7 +182,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SKIP_TRANSFER_SMART_ACCESS_VIDEO, ctx->skip_transfer_sav);
 
     if (avctx->extradata_size) {
-        res = ctx->context->pVtbl->AllocBuffer(ctx->context, AMF_MEMORY_HOST, avctx->extradata_size, &buffer);
+        res = internal->context->pVtbl->AllocBuffer(internal->context, AMF_MEMORY_HOST, avctx->extradata_size, &buffer);
         if (res == AMF_OK) {
             memcpy(buffer->pVtbl->GetNative(buffer), avctx->extradata, avctx->extradata_size);
             AMF_ASSIGN_PROPERTY_INTERFACE(res,ctx->decoder, AMF_VIDEO_DECODER_EXTRADATA, buffer);
@@ -223,221 +195,34 @@ static int amf_init_decoder(AVCodecContext *avctx)
     return 0;
 }
 
-#if CONFIG_D3D11VA
-static int amf_init_from_d3d11_device(AVCodecContext *avctx, AVD3D11VADeviceContext *hwctx)
-{
-    AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMF_RESULT res;
-
-    res = ctx->context->pVtbl->InitDX11(ctx->context, hwctx->device, AMF_DX11_1);
-    if (res != AMF_OK) {
-        if (res == AMF_NOT_SUPPORTED)
-            av_log(avctx, AV_LOG_ERROR, "AMF via D3D11 is not supported on the given device.\n");
-        else
-            av_log(avctx, AV_LOG_ERROR, "AMF failed to initialise on the given D3D11 device: %d.\n", res);
-        return AVERROR(ENODEV);
-    }
-
-    return 0;
-}
-#endif
-
-#if CONFIG_DXVA2
-static int amf_init_from_dxva2_device(AVCodecContext *avctx, AVDXVA2DeviceContext *hwctx)
-{
-    AvAmfDecoderContext *ctx = avctx->priv_data;
-    IDirect3DDevice9    *device;
-    HANDLE              device_handle;
-    HRESULT             hr;
-    AMF_RESULT          res;
-    int ret;
-
-    hr = IDirect3DDeviceManager9_OpenDeviceHandle(hwctx->devmgr, &device_handle);
-    if (FAILED(hr)) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to open device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
-        return AVERROR_EXTERNAL;
-    }
-
-    hr = IDirect3DDeviceManager9_LockDevice(hwctx->devmgr, device_handle, &device, FALSE);
-    if (SUCCEEDED(hr)) {
-        IDirect3DDeviceManager9_UnlockDevice(hwctx->devmgr, device_handle, FALSE);
-        ret = 0;
-    } else {
-        av_log(avctx, AV_LOG_ERROR, "Failed to lock device handle for Direct3D9 device: %lx.\n", (unsigned long)hr);
-        ret = AVERROR_EXTERNAL;
-    }
-
-    IDirect3DDeviceManager9_CloseDeviceHandle(hwctx->devmgr, device_handle);
-
-    if (ret < 0)
-        return ret;
-
-    res = ctx->context->pVtbl->InitDX9(ctx->context, device);
-
-    IDirect3DDevice9_Release(device);
-
-    if (res != AMF_OK) {
-        if (res == AMF_NOT_SUPPORTED)
-            av_log(avctx, AV_LOG_ERROR, "AMF via D3D9 is not supported on the given device.\n");
-        else
-            av_log(avctx, AV_LOG_ERROR, "AMF failed to initialise on given D3D9 device: %d.\n", res);
-        return AVERROR(ENODEV);
-    }
-
-    return 0;
-}
-#endif
-
-static int amf_init_from_amf_device(AVCodecContext *avctx, AVAMFDeviceContext *amf_hwctx)
-{
-    enum AVPixelFormat pix_fmt;
-    AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMF_RESULT         res;
-
-    if (ctx->hw_frames_ctx)
-        pix_fmt = ((AVHWFramesContext*)ctx->hw_frames_ctx->data)->sw_format;
-    else
-        pix_fmt = avctx->pix_fmt;
-    ctx->format = amf_av_to_amf_format(pix_fmt);
-    AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
-                    "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
-
-    ctx->uses_wh_context = 1;
-    ctx->context = amf_hwctx->context;
-    return 0;
-}
-
 static int amf_init_decoder_context(AVCodecContext *avctx)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFContext1 *context1 = NULL;
     int ret;
 
-    // configure AMF logger
-    // the return of these functions indicates old state and do not affect behaviour
-    ctx->trace->pVtbl->EnableWriter(ctx->trace, AMF_TRACE_WRITER_DEBUG_OUTPUT, ctx->log_to_dbg != 0 );
-    if (ctx->log_to_dbg)
-        ctx->trace->pVtbl->SetWriterLevel(ctx->trace, AMF_TRACE_WRITER_DEBUG_OUTPUT, AMF_TRACE_TRACE);
-    ctx->trace->pVtbl->EnableWriter(ctx->trace, AMF_TRACE_WRITER_CONSOLE, 0);
-    ctx->trace->pVtbl->SetGlobalLevel(ctx->trace, AMF_TRACE_TRACE);
-
-    if (amf_trace_writer.avctx == NULL)
-        amf_trace_writer.avctx = avctx;
-    ctx->trace->pVtbl->RegisterWriter(ctx->trace, FFMPEG_AMF_WRITER_ID,(AMFTraceWriter*)&amf_trace_writer, 1);
-    ctx->trace->pVtbl->SetWriterLevel(ctx->trace, FFMPEG_AMF_WRITER_ID, AMF_TRACE_TRACE);
-
-    ctx->uses_wh_context = 0;
-    if (avctx->hw_frames_ctx){
-        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
-            ret = amf_init_from_amf_device(avctx, frames_ctx->device_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-        }
-
-        return 0;
-    }
-    else if  (avctx->hw_device_ctx) {
-        AVHWDeviceContext   *hwdev_ctx;
-        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-
-        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
-        {
-            ret = amf_init_from_amf_device(avctx, hwdev_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-        }
-        return 0;
-    }
-    ret = ctx->factory->pVtbl->CreateContext(ctx->factory, &ctx->context);
-    AMF_RETURN_IF_FALSE(ctx, ret == AMF_OK, AVERROR_UNKNOWN, "CreateContext() failed with error %d\n", ret);
-
     if (avctx->hw_frames_ctx) {
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-
-        if (amf_av_to_amf_format(frames_ctx->sw_format) == AMF_SURFACE_UNKNOWN) {
-            av_log(avctx, AV_LOG_ERROR, "Format of input frames context (%s) is not supported by AMF.\n",
-                   av_get_pix_fmt_name(frames_ctx->sw_format));
-            return AVERROR(EINVAL);
-        }
-
-        switch (frames_ctx->device_ctx->type) {
-#if CONFIG_D3D11VA
-        case AV_HWDEVICE_TYPE_D3D11VA:
-            ret = amf_init_from_d3d11_device(avctx, frames_ctx->device_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-            break;
-#endif
-#if CONFIG_DXVA2
-        case AV_HWDEVICE_TYPE_DXVA2:
-            ret = amf_init_from_dxva2_device(avctx, frames_ctx->device_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-            break;
-#endif
-        default:
-            av_log(avctx, AV_LOG_ERROR, "AMF initialisation from a %s frames context is not supported.\n",
-                   av_hwdevice_get_type_name(frames_ctx->device_ctx->type));
-            return AVERROR(ENOSYS);
-        }
-
+        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
+        if (ret < 0)
+            return ret;
         ctx->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
         if (!ctx->hw_frames_ctx)
             return AVERROR(ENOMEM);
     }
     else if (avctx->hw_device_ctx) {
         AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-
-        switch (device_ctx->type) {
-#if CONFIG_D3D11VA
-        case AV_HWDEVICE_TYPE_D3D11VA:
-            ret = amf_init_from_d3d11_device(avctx, device_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-            break;
-#endif
-#if CONFIG_DXVA2
-        case AV_HWDEVICE_TYPE_DXVA2:
-            ret = amf_init_from_dxva2_device(avctx, device_ctx->hwctx);
-            if (ret < 0)
-                return ret;
-            break;
-#endif
-        default:
-            av_log(avctx, AV_LOG_ERROR, "AMF initialisation from a %s device is not supported.\n",
-                   av_hwdevice_get_type_name(device_ctx->type));
-            return AVERROR(ENOSYS);
-        }
-
+        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
+        if (ret < 0)
+            return ret;
         ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
         if (!ctx->hw_device_ctx)
             return AVERROR(ENOMEM);
 
     } else {
-        ret = ctx->context->pVtbl->InitDX11(ctx->context, NULL, AMF_DX11_1);
-        if (ret == AMF_OK) {
-            av_log(avctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D11.\n");
-        } else {
-            ret = ctx->context->pVtbl->InitDX9(ctx->context, NULL);
-            if (ret == AMF_OK) {
-                av_log(avctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D9.\n");
-            } else {
-                AMFGuid guid = IID_AMFContext1();
-                ret = ctx->context->pVtbl->QueryInterface(ctx->context, &guid, (void**)&context1);
-                AMF_RETURN_IF_FALSE(ctx, ret == AMF_OK, AVERROR_UNKNOWN, "CreateContext1() failed with error %d\n", ret);
-
-                ret = context1->pVtbl->InitVulkan(context1, NULL);
-                context1->pVtbl->Release(context1);
-                if (ret != AMF_OK) {
-                    if (ret == AMF_NOT_SUPPORTED)
-                        av_log(avctx, AV_LOG_ERROR, "AMF via Vulkan is not supported on the given device.\n");
-                    else
-                        av_log(avctx, AV_LOG_ERROR, "AMF failed to initialise on the given Vulkan device: %d.\n", ret);
-                    return AVERROR(ENOSYS);
-                }
-                av_log(avctx, AV_LOG_VERBOSE, "AMF initialisation succeeded via Vulkan.\n");
-            }
+        ret = amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
+        if (ret != 0) {
+            return ret;
         }
     }
 
@@ -453,25 +238,10 @@ static int amf_decode_close(AVCodecContext *avctx)
         ctx->decoder->pVtbl->Release(ctx->decoder);
         ctx->decoder = NULL;
     }
-    if (ctx->context && ctx->uses_wh_context != 1) {
-        ctx->context->pVtbl->Terminate(ctx->context);
-        ctx->context->pVtbl->Release(ctx->context);
-        ctx->context = NULL;
-    }
 
+    av_buffer_unref(&ctx->amf_device_ctx_internal);
     av_buffer_unref(&ctx->hw_device_ctx);
     av_buffer_unref(&ctx->hw_frames_ctx);
-        if (ctx->trace) {
-        ctx->trace->pVtbl->UnregisterWriter(ctx->trace, FFMPEG_AMF_WRITER_ID);
-    }
-    if (ctx->library) {
-        dlclose(ctx->library);
-        ctx->library = NULL;
-    }
-
-    ctx->trace = NULL;
-    ctx->debug = NULL;
-    ctx->factory = NULL;
     av_buffer_unref(&ctx->amf_device_ctx);
 
     return 0;
@@ -480,14 +250,38 @@ static int amf_decode_close(AVCodecContext *avctx)
 
 static int amf_decode_init(AVCodecContext *avctx)
 {
+    AvAmfDecoderContext *ctx = avctx->priv_data;
     int ret;
 
-    if ((ret = amf_load_library(avctx)) == 0) {
-        if ((ret = amf_init_decoder_context(avctx)) == 0) {
-            if ((ret = amf_init_decoder(avctx)) == 0) {
-                return 0;
-            }
+    if (avctx->hw_frames_ctx){
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
+            AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
+    }
+    else if  (avctx->hw_device_ctx) {
+        AVHWDeviceContext   *hwdev_ctx;
+        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
+        {
+            AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
+            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+        }
+    }  else {
+        AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
+        ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
+                                                amf_context_internal_free, NULL, 0);
+        if ((ret == amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+            amf_decode_close(avctx);
+            return ret;
+        }
+        if ((ret = amf_init_decoder_context(avctx)) != 0) {
+            return ret;
+        }
+    }
+    if ((ret = amf_init_decoder(avctx)) == 0) {
+        return 0;
     }
     amf_decode_close(avctx);
     return ret;
@@ -709,7 +503,9 @@ fail:
 static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer* buffer, const AVPacket* pkt)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMFContext          *ctxt = ctx->context;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
+    AMFContext          *ctxt = internal->context;
+
     AMF_RESULT          res;
 
     AMF_RETURN_IF_FALSE(ctxt, buffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
@@ -726,7 +522,8 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
 static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* pkt, AMFBuffer** buffer)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
-    AMFContext          *ctxt = ctx->context;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
+    AMFContext          *ctxt = internal->context;
     void                *mem;
     AMF_RESULT          err;
     AMFBuffer           *buf = NULL;

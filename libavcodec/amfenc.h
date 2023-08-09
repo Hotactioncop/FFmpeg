@@ -44,8 +44,8 @@ typedef struct AmfContext {
     AVClass            *avclass;
     // access to AMF runtime
 
-    AMFContext         *context; ///< AMF context
-    int                 uses_wh_context;
+    AVBufferRef        *amf_device_ctx_internal;
+
     //encoder
     AMFComponent       *encoder; ///< AMF encoder object
     amf_bool            eof;     ///< flag indicating EOF happened
