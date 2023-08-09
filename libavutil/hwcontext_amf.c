@@ -43,11 +43,27 @@
 #include <dlfcn.h>
 #endif
 
+static const AVClass amflib_class = {
+    .class_name = "amf",
+    .item_name = av_default_item_name,
+    .version = LIBAVUTIL_VERSION_INT,
+};
+
+typedef struct AMFLibraryContext {
+    const AVClass      *avclass;
+} AMFLibraryContext;
+
+static AMFLibraryContext amflib_context =
+{
+    .avclass = &amflib_class,
+};
+
+
 static void AMF_CDECL_CALL AMFTraceWriter_Write(AMFTraceWriter *pThis,
     const wchar_t *scope, const wchar_t *message)
 {
     AmfTraceWriter *tracer = (AmfTraceWriter*)pThis;
-    av_log(tracer->avctx, AV_LOG_DEBUG, "%ls: %ls", scope, message); // \n is provided from AMF
+    av_log(tracer->avcl, AV_LOG_DEBUG, "%ls: %ls", scope, message); // \n is provided from AMF
 }
 
 static void AMF_CDECL_CALL AMFTraceWriter_Flush(AMFTraceWriter *pThis)
@@ -63,6 +79,7 @@ static AMFTraceWriterVtbl tracer_vtbl =
 AmfTraceWriter amf_trace_writer =
 {
     .vtbl = &tracer_vtbl,
+    .avcl = &amflib_context,
     .avctx = NULL
 };
 
