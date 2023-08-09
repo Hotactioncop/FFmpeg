@@ -62,35 +62,6 @@
         goto fail; \
     }
 
-typedef struct FormatMap {
-    enum AVPixelFormat       av_format;
-    enum AMF_SURFACE_FORMAT  amf_format;
-} FormatMap;
-
-static const FormatMap format_map[] =
-{
-    { AV_PIX_FMT_NONE,       AMF_SURFACE_UNKNOWN },
-    { AV_PIX_FMT_NV12,       AMF_SURFACE_NV12 },
-    { AV_PIX_FMT_P010,       AMF_SURFACE_P010 },
-
-    { AV_PIX_FMT_BGRA,       AMF_SURFACE_BGRA },
-
-    { AV_PIX_FMT_RGBA,       AMF_SURFACE_RGBA },
-
-    { AV_PIX_FMT_YUV420P,    AMF_SURFACE_YUV420P },
-};
-
-static enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
-{
-    int i;
-    for (i = 0; i < amf_countof(format_map); i++) {
-        if (format_map[i].av_format == fmt) {
-            return format_map[i].amf_format;
-        }
-    }
-    return AMF_SURFACE_UNKNOWN;
-}
-
 typedef struct AMFScaleContext {
     const AVClass *class;
 
@@ -141,7 +112,8 @@ static int amf_copy_surface(AVFilterContext *avctx, const AVFrame *frame,
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AMFSurface *surface = (AMFSurface*)(opaque);
-    surface->pVtbl->Release(surface);
+    // FIXME: release surface properly
+    //surface->pVtbl->Release(surface);
 }
 
 static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
@@ -150,7 +122,8 @@ static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pS
 
     if (!frame)
         return NULL;
-
+     enum AMF_MEMORY_TYPE t = pSurface->pVtbl->GetMemoryType(pSurface);
+    /*
     switch (pSurface->pVtbl->GetMemoryType(pSurface))
     {
 #if CONFIG_D3D11VA
@@ -184,11 +157,18 @@ static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pS
         }
         break;
 #endif
-    default:
+    default: */
+        // FIXME: add support for other memory types
         {
-            av_assert0(0);//should not happen
+            frame->data[3] = pSurface;
+            frame->buf[0] = av_buffer_create(NULL,
+                                     0,
+                                     amf_free_amfsurface,
+                                     pSurface,
+                                     AV_BUFFER_FLAG_READONLY);
+            pSurface->pVtbl->Acquire(pSurface);
         }
-    }
+    //}
 
     return frame;
 }
@@ -211,6 +191,13 @@ static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *fram
 
             res = ctx->context->pVtbl->CreateSurfaceFromDX11Native(ctx->context, texture, &surface, NULL); // wrap to AMF surface
             AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX11Native() failed  with error %d\n", res);
+            hw_surface = 1;
+        }
+        break;
+    // FIXME: need to use hw_frames_ctx to get texture
+    case AV_PIX_FMT_AMF:
+        {
+            surface = (AMFSurface*)frame->data[3]; // actual surface
             hw_surface = 1;
         }
         break;
@@ -290,9 +277,11 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_P010,
         AV_PIX_FMT_BGRA,
         AV_PIX_FMT_RGBA,
+        AV_PIX_FMT_AMF,
         AV_PIX_FMT_NONE,
     };
     static const enum AVPixelFormat output_pix_fmts_default[] = {
+        AV_PIX_FMT_AMF,
         AV_PIX_FMT_D3D11,
         AV_PIX_FMT_DXVA2_VLD,
         AV_PIX_FMT_NONE,
@@ -419,7 +408,9 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
         hwframes_out->format    = outlink->format;
         hwframes_out->sw_format = inlink->format;
-        pix_fmt_in = inlink->format;
+        //FIXME:  use hw_frames_ctx->format instead of inlink->format when it will be available
+        if (inlink->format != AV_PIX_FMT_AMF)
+            pix_fmt_in = inlink->format;
 
     } else {
         err = av_hwdevice_ctx_create(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, NULL, NULL, 0);
@@ -466,7 +457,8 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AMF_ASSIGN_PROPERTY_SIZE(res, ctx->hq_scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
     AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-SetProperty() failed with error %d\n", res);
 
-    res = ctx->hq_scaler->pVtbl->Init(ctx->hq_scaler, amf_av_to_amf_format(pix_fmt_in), inlink->w, inlink->h);
+    // FIXME: add support for other formats
+    res = ctx->hq_scaler->pVtbl->Init(ctx->hq_scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
     AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-Init() failed with error %d\n", res);
 
     return 0;
@@ -483,6 +475,7 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     AMFData *data_out = NULL;
 
     AVFrame *out = NULL;
+    enum AMF_SURFACE_FORMAT f;
     int ret = 0;
 
     if (!ctx->hq_scaler)
@@ -491,7 +484,7 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     ret = amf_avframe_to_amfsurface(avctx, in, &surface_in);
     if (ret < 0)
         goto fail;
-
+    f = surface_in->pVtbl->GetFormat(surface_in);
     res = ctx->hq_scaler->pVtbl->SubmitInput(ctx->hq_scaler, (AMFData*)surface_in);
     AMFAV_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
 
@@ -580,5 +573,8 @@ AVFilter ff_vf_scale_amf_hq = {
     FILTER_INPUTS(amf_scale_inputs),
     FILTER_OUTPUTS(amf_scale_outputs),
 
+    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_AMF),
+
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
+    .flags          = AVFILTER_FLAG_HWDEVICE,
 };

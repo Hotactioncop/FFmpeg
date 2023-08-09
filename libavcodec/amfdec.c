@@ -86,7 +86,8 @@ static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AMFSurface *surface = (AMFSurface*)(opaque);
-    surface->pVtbl->Release(surface);
+    //FIXME: release shared surface properly
+    //surface->pVtbl->Release(surface);
 }
 
 static int amf_load_library(AVCodecContext *avctx)
@@ -339,6 +340,7 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
     else if  (avctx->hw_device_ctx) {
         AVHWDeviceContext   *hwdev_ctx;
         hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+
         if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
         {
             ret = amf_init_from_amf_device(avctx, hwdev_ctx->hwctx);
@@ -522,12 +524,12 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    /*switch (pSurface->pVtbl->GetMemoryType(pSurface))
+    /*switch (surface->pVtbl->GetMemoryType(surface))
         {
     #if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
             {
-                AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
+                AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
                 frame->data[0] = plane0->pVtbl->GetNative(plane0);
                 frame->linesize[0] = plane0->pVtbl->GetHPitch(plane0);
                 frame->data[1] = (uint8_t*)(intptr_t)0;
@@ -535,29 +537,29 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                 frame->buf[0] = av_buffer_create(NULL,
                                          0,
                                          amf_free_amfsurface,
-                                         pSurface,
+                                         surface,
                                          AV_BUFFER_FLAG_READONLY);
-                pSurface->pVtbl->Acquire(pSurface);
+                surface->pVtbl->Acquire(surface);
             }
             break;
     #endif
     #if CONFIG_DXVA2
             case AMF_MEMORY_DX9:
             {
-                AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
+                AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
                 frame->data[3] = plane0->pVtbl->GetNative(plane0);
 
                 frame->buf[0] = av_buffer_create(NULL,
                                          0,
                                          amf_free_amfsurface,
-                                         pSurface,
+                                         surface,
                                          AV_BUFFER_FLAG_READONLY);
-                pSurface->pVtbl->Acquire(pSurface);
+                surface->pVtbl->Acquire(surface);
             }
             break;
     #endif
         default:
-            {*/
+            {
                 ret = surface->pVtbl->Convert(surface, AMF_MEMORY_HOST);
                 AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
@@ -573,10 +575,19 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                                                      amf_free_amfsurface,
                                                      surface,
                                                      AV_BUFFER_FLAG_READONLY);
-        //   }
-        //}
+           }
+        }
+    */
+   // FIXME: this is a hack to get the surface in a format that ffmpeg can handle
+    frame->data[3] = surface;
+    frame->buf[0] = av_buffer_create(NULL,
+                                     0,
+                                     amf_free_amfsurface,
+                                     surface,
+                                     AV_BUFFER_FLAG_READONLY);
+    surface->pVtbl->Acquire(surface);
+    frame->format = AV_PIX_FMT_AMF; //FIXME: amf_to_av_format(surface->pVtbl->GetFormat(surface));
 
-    frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
     frame->width  = avctx->width;
     frame->height = avctx->height;
 
