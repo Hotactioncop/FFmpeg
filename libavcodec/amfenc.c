@@ -114,35 +114,6 @@ const enum AVPixelFormat ff_amf_pix_fmts[] = {
     AV_PIX_FMT_NONE
 };
 
-typedef struct FormatMap {
-    enum AVPixelFormat       av_format;
-    enum AMF_SURFACE_FORMAT  amf_format;
-} FormatMap;
-
-static const FormatMap format_map[] =
-{
-    { AV_PIX_FMT_NONE,       AMF_SURFACE_UNKNOWN },
-    { AV_PIX_FMT_NV12,       AMF_SURFACE_NV12 },
-    { AV_PIX_FMT_P010,       AMF_SURFACE_P010 },
-    { AV_PIX_FMT_BGR0,       AMF_SURFACE_BGRA },
-    { AV_PIX_FMT_RGB0,       AMF_SURFACE_RGBA },
-    { AV_PIX_FMT_RGBA,       AMF_SURFACE_RGBA },
-    { AV_PIX_FMT_GRAY8,      AMF_SURFACE_GRAY8 },
-    { AV_PIX_FMT_YUV420P,    AMF_SURFACE_YUV420P },
-    { AV_PIX_FMT_YUYV422,    AMF_SURFACE_YUY2 },
-};
-
-static enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
-{
-    int i;
-    for (i = 0; i < amf_countof(format_map); i++) {
-        if (format_map[i].av_format == fmt) {
-            return format_map[i].amf_format;
-        }
-    }
-    return AMF_SURFACE_UNKNOWN;
-}
-
 static int amf_init_context(AVCodecContext *avctx)
 {
     AmfContext        *ctx = avctx->priv_data;
@@ -210,7 +181,11 @@ static int amf_init_encoder(AVCodecContext *avctx)
             return AVERROR(EINVAL);
         }
         ctx->uses_wh_context = 1;
-        ctx->format = amf_av_to_amf_format(pix_fmt);
+        // FiXME: this is a hack to get the correct format for AMF HW context
+        if (avctx->pix_fmt != AV_PIX_FMT_AMF)
+            ctx->format = amf_av_to_amf_format(pix_fmt);
+        else
+            ctx->format = AMF_SURFACE_NV12;
         AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
                         "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
 
@@ -495,6 +470,12 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             }
             break;
 #endif
+        case AV_PIX_FMT_AMF:
+            {
+                surface = frame->data[3]; // actual texture
+                hw_surface = 1;
+            }
+            break;
         default:
             {
                 res = ctx->context->pVtbl->AllocSurface(ctx->context, AMF_MEMORY_HOST, ctx->format, avctx->width, avctx->height, &surface);
@@ -575,27 +556,27 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     do {
         block_and_wait = 0;
         // poll data
-        if (!avpkt->data && !avpkt->buf) {
-            res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
-            if (data) {
-                // copy data to packet
-                AMFBuffer *buffer;
-                AMFGuid guid = IID_AMFBuffer();
-                query_output_data_flag = 1;
-                data->pVtbl->QueryInterface(data, &guid, (void**)&buffer); // query for buffer interface
-                ret = amf_copy_buffer(avctx, avpkt, buffer);
+        res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
+        if (data) {
+            // copy data to packet
+            AMFBuffer* buffer;
+            AMFGuid guid = IID_AMFBuffer();
+            data->pVtbl->QueryInterface(data, &guid, (void**)&buffer); // query for buffer interface
+            ret = amf_copy_buffer(avctx, avpkt, buffer);
 
-                buffer->pVtbl->Release(buffer);
+            buffer->pVtbl->Release(buffer);
 
-                if (data->pVtbl->HasProperty(data, L"av_frame_ref")) {
-                    AMFBuffer* frame_ref_storage_buffer;
-                    res = amf_get_property_buffer(data, L"av_frame_ref", &frame_ref_storage_buffer);
-                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_ref\" with error %d\n", res);
-                    amf_release_buffer_with_frame_ref(frame_ref_storage_buffer);
-                    ctx->hwsurfaces_in_queue--;
-                }
+            if (data->pVtbl->HasProperty(data, L"av_frame_ref")) {
+                AMFBuffer *frame_ref_storage_buffer;
+                res = amf_get_property_buffer(data, L"av_frame_ref", &frame_ref_storage_buffer);
+                AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_ref\" with error %d\n", res);
+                amf_release_buffer_with_frame_ref(frame_ref_storage_buffer);
+                ctx->hwsurfaces_in_queue--;
+            }
 
-                data->pVtbl->Release(data);
+            data->pVtbl->Release(data);
+
+            AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
 
             if (ctx->delayed_surface != NULL) { // try to resubmit frame
                 if (ctx->delayed_surface->pVtbl->HasProperty(ctx->delayed_surface, L"av_frame_hdrmeta")) {
@@ -618,11 +599,25 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
                     av_frame_unref(ctx->delayed_frame);
                     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated SubmitInput() failed with error %d\n", res);
 
-        if (query_output_data_flag == 0) {
-            if (res_resubmit == AMF_INPUT_FULL || ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
-                block_and_wait = 1;
-                av_usleep(1000);
+                    ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
+                    if (ret < 0)
+                        return ret;
+                } else {
+                    av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed frame submission got AMF_INPUT_FULL- should not happen\n");
+                }
+            } else if (ctx->delayed_drain) { // try to resubmit drain
+                res = ctx->encoder->pVtbl->Drain(ctx->encoder);
+                if (res != AMF_INPUT_FULL) {
+                    ctx->delayed_drain = 0;
+                    ctx->eof = 1; // drain started
+                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated Drain() failed with error %d\n", res);
+                } else {
+                    av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed drain submission got AMF_INPUT_FULL- should not happen\n");
+                }
             }
+        } else if (ctx->delayed_surface != NULL || ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
+            block_and_wait = 1;
+            av_usleep(1000); // wait and poll again
         }
     } while (block_and_wait);
 

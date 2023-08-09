@@ -93,7 +93,7 @@ const FormatMap format_map[] =
     { AV_PIX_FMT_ARGB,          AMF_SURFACE_ARGB },
     { AV_PIX_FMT_RGBA,          AMF_SURFACE_RGBA },
     { AV_PIX_FMT_GRAY8,         AMF_SURFACE_GRAY8 },
-    { AV_PIX_FMT_YUV420P,       AMF_SURFACE_YUV420P },
+    { AV_PIX_FMT_YUV420P,       AMF_SURFACE_NV12 }, // FIXME change this when hw_scaler will process format properly
     { AV_PIX_FMT_YUYV422,       AMF_SURFACE_YUY2 },
     { AV_PIX_FMT_P010,          AMF_SURFACE_P010 },
     { AV_PIX_FMT_YUV420P10,     AMF_SURFACE_P010 },
