@@ -34,6 +34,7 @@
 #include "libavutil/hwcontext_amf.h"
 
 #include "AMF/components/HQScaler.h"
+#include "amf_common.h"
 
 #include "avfilter.h"
 #include "formats.h"
@@ -48,177 +49,6 @@
 #if CONFIG_D3D11VA
 #include <d3d11.h>
 #endif
-
-typedef struct AMFScaleContext {
-    const AVClass *class;
-
-    int width, height;
-    enum AVPixelFormat format;
-
-    char *w_expr;
-    char *h_expr;
-    char *format_str;
-
-    AMFComponent        *hq_scaler;
-    AVBufferRef         *amf_device_ref;
-
-    AVBufferRef         *hwframes_in_ref;
-    AVBufferRef         *hwframes_out_ref;
-    AVBufferRef         *hwdevice_ref;
-
-    AVBufferRef         *amf_device_ctx_internal;
-
-} AMFScaleContext;
-
-
-static int amf_copy_surface(AVFilterContext *avctx, const AVFrame *frame,
-    AMFSurface* surface)
-{
-    AMFPlane *plane;
-    uint8_t  *dst_data[4];
-    int       dst_linesize[4];
-    int       planes;
-    int       i;
-
-    planes = surface->pVtbl->GetPlanesCount(surface);
-    av_assert0(planes < FF_ARRAY_ELEMS(dst_data));
-
-    for (i = 0; i < planes; i++) {
-        plane = surface->pVtbl->GetPlaneAt(surface, i);
-        dst_data[i] = plane->pVtbl->GetNative(plane);
-        dst_linesize[i] = plane->pVtbl->GetHPitch(plane);
-    }
-    av_image_copy(dst_data, dst_linesize,
-        (const uint8_t**)frame->data, frame->linesize, frame->format,
-        frame->width, frame->height);
-
-    return 0;
-}
-
-static void amf_free_amfsurface(void *opaque, uint8_t *data)
-{
-    AMFSurface *surface = (AMFSurface*)(opaque);
-    // FIXME: release surface properly
-    //surface->pVtbl->Release(surface);
-}
-
-static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
-{
-    AVFrame *frame = av_frame_alloc();
-
-    if (!frame)
-        return NULL;
-    /*
-    switch (pSurface->pVtbl->GetMemoryType(pSurface))
-    {
-#if CONFIG_D3D11VA
-        case AMF_MEMORY_DX11:
-        {
-            AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
-            frame->data[0] = plane0->pVtbl->GetNative(plane0);
-            frame->data[1] = (uint8_t*)(intptr_t)0;
-
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
-        }
-        break;
-#endif
-#if CONFIG_DXVA2
-        case AMF_MEMORY_DX9:
-        {
-            AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
-            frame->data[3] = plane0->pVtbl->GetNative(plane0);
-
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
-        }
-        break;
-#endif
-    default: */
-        // FIXME: add support for other memory types
-        {
-            frame->data[3] = pSurface;
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
-        }
-    //}
-
-    return frame;
-}
-
-static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *frame, AMFSurface** ppSurface)
-{
-    AMFScaleContext *ctx = avctx->priv;
-    AVAMFDeviceContextInternal* internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
-    AMFSurface *surface;
-    AMF_RESULT  res;
-    int hw_surface = 0;
-
-    switch (frame->format) {
-#if CONFIG_D3D11VA
-    case AV_PIX_FMT_D3D11:
-        {
-            static const GUID AMFTextureArrayIndexGUID = { 0x28115527, 0xe7c3, 0x4b66, { 0x99, 0xd3, 0x4f, 0x2a, 0xe6, 0xb4, 0x7f, 0xaf } };
-            ID3D11Texture2D *texture = (ID3D11Texture2D*)frame->data[0]; // actual texture
-            int index = (intptr_t)frame->data[1]; // index is a slice in texture array is - set to tell AMF which slice to use
-            texture->lpVtbl->SetPrivateData(texture, &AMFTextureArrayIndexGUID, sizeof(index), &index);
-
-            res = internal->context->pVtbl->CreateSurfaceFromDX11Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
-            AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX11Native() failed  with error %d\n", res);
-            hw_surface = 1;
-        }
-        break;
-#endif
-    // FIXME: need to use hw_frames_ctx to get texture
-    case AV_PIX_FMT_AMF:
-        {
-            surface = (AMFSurface*)frame->data[3]; // actual surface
-            hw_surface = 1;
-        }
-        break;
-
-#if CONFIG_DXVA2
-    case AV_PIX_FMT_DXVA2_VLD:
-        {
-            IDirect3DSurface9 *texture = (IDirect3DSurface9 *)frame->data[3]; // actual texture
-
-            res = internal->context->pVtbl->CreateSurfaceFromDX9Native(internal->context, texture, &surface, NULL); // wrap to AMF surface
-            AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "CreateSurfaceFromDX9Native() failed  with error %d\n", res);
-            hw_surface = 1;
-        }
-        break;
-#endif
-    default:
-        {
-            AMF_SURFACE_FORMAT amf_fmt = amf_av_to_amf_format(frame->format);
-            res = internal->context->pVtbl->AllocSurface(internal->context, AMF_MEMORY_HOST, amf_fmt, frame->width, frame->height, &surface);
-            AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
-            amf_copy_surface(avctx, frame, surface);
-        }
-        break;
-    }
-
-    if (hw_surface) {
-        // input HW surfaces can be vertically aligned by 16; tell AMF the real size
-        surface->pVtbl->SetCrop(surface, 0, 0, frame->width, frame->height);
-    }
-
-    surface->pVtbl->SetPts(surface, frame->pts);
-    *ppSurface = surface;
-    return 0;
-}
 
 static int amf_scale_init(AVFilterContext *avctx)
 {
@@ -241,10 +71,10 @@ static void amf_scale_uninit(AVFilterContext *avctx)
 {
     AMFScaleContext *ctx = avctx->priv;
 
-    if (ctx->hq_scaler) {
-        ctx->hq_scaler->pVtbl->Terminate(ctx->hq_scaler);
-        ctx->hq_scaler->pVtbl->Release(ctx->hq_scaler);
-        ctx->hq_scaler = NULL;
+    if (ctx->scaler) {
+        ctx->scaler->pVtbl->Terminate(ctx->scaler);
+        ctx->scaler->pVtbl->Release(ctx->scaler);
+        ctx->scaler = NULL;
     }
 
     av_buffer_unref(&ctx->amf_device_ref);
@@ -444,16 +274,16 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         return AVERROR(ENOMEM);
     }
     internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
-    res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFHQScaler, &ctx->hq_scaler);
+    res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFHQScaler, &ctx->scaler);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFHQScaler, res);
 
     out_size.width = outlink->w;
     out_size.height = outlink->h;
-    AMF_ASSIGN_PROPERTY_SIZE(res, ctx->hq_scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
+    AMF_ASSIGN_PROPERTY_SIZE(res, ctx->scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-SetProperty() failed with error %d\n", res);
 
     // FIXME: add support for other formats
-    res = ctx->hq_scaler->pVtbl->Init(ctx->hq_scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
+    res = ctx->scaler->pVtbl->Init(ctx->scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-Init() failed with error %d\n", res);
 
     return 0;
@@ -472,16 +302,16 @@ static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFrame *out = NULL;
     int ret = 0;
 
-    if (!ctx->hq_scaler)
+    if (!ctx->scaler)
         return AVERROR(EINVAL);
 
     ret = amf_avframe_to_amfsurface(avctx, in, &surface_in);
     if (ret < 0)
         goto fail;
-    res = ctx->hq_scaler->pVtbl->SubmitInput(ctx->hq_scaler, (AMFData*)surface_in);
+    res = ctx->scaler->pVtbl->SubmitInput(ctx->scaler, (AMFData*)surface_in);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
 
-    res = ctx->hq_scaler->pVtbl->QueryOutput(ctx->hq_scaler, &data_out);
+    res = ctx->scaler->pVtbl->QueryOutput(ctx->scaler, &data_out);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "QueryOutput() failed with error %d\n", res);
 
     if (data_out) {
