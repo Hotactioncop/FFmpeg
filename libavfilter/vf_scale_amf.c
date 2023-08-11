@@ -50,40 +50,6 @@
 #include <d3d11.h>
 #endif
 
-
-static int amf_scale_init(AVFilterContext *avctx)
-{
-    AMFScaleContext     *ctx = avctx->priv;
-
-    if (!strcmp(ctx->format_str, "same")) {
-        ctx->format = AV_PIX_FMT_NONE;
-    } else {
-        ctx->format = av_get_pix_fmt(ctx->format_str);
-        if (ctx->format == AV_PIX_FMT_NONE) {
-            av_log(avctx, AV_LOG_ERROR, "Unrecognized pixel format: %s\n", ctx->format_str);
-            return AVERROR(EINVAL);
-        }
-    }
-
-    return 0;
-}
-
-static void amf_scale_uninit(AVFilterContext *avctx)
-{
-    AMFScaleContext *ctx = avctx->priv;
-
-    if (ctx->scaler) {
-        ctx->scaler->pVtbl->Terminate(ctx->scaler);
-        ctx->scaler->pVtbl->Release(ctx->scaler);
-        ctx->scaler = NULL;
-    }
-
-    av_buffer_unref(&ctx->amf_device_ref);
-    av_buffer_unref(&ctx->hwdevice_ref);
-    av_buffer_unref(&ctx->hwframes_in_ref);
-    av_buffer_unref(&ctx->hwframes_out_ref);
-}
-
 static int amf_scale_query_formats(AVFilterContext *avctx)
 {
     const enum AVPixelFormat *output_pix_fmts;
@@ -173,112 +139,15 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AVFilterLink   *inlink = avctx->inputs[0];
     AMFScaleContext  *ctx = avctx->priv;
     AVAMFDeviceContextInternal * internal = NULL;
-    AVAMFDeviceContext *amf_ctx;
     AVHWFramesContext *hwframes_out;
-    enum AVPixelFormat pix_fmt_in;
     AMFSize out_size;
     int err;
     AMF_RESULT res;
     enum AMF_VIDEO_CONVERTER_COLOR_PROFILE_ENUM amf_color_profile;
 
-    if ((err = ff_scale_eval_dimensions(avctx,
-                                        ctx->w_expr, ctx->h_expr,
-                                        inlink, outlink,
-                                        &ctx->width, &ctx->height)) < 0)
-        return err;
-
-    av_buffer_unref(&ctx->amf_device_ref);
-    av_buffer_unref(&ctx->hwframes_in_ref);
-    av_buffer_unref(&ctx->hwframes_out_ref);
-
-    if (inlink->hw_frames_ctx) {
-        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)inlink->hw_frames_ctx->data;
-        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
-            AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
-            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
-        }
-        if (amf_av_to_amf_format(frames_ctx->sw_format) == AMF_SURFACE_UNKNOWN) {
-            av_log(avctx, AV_LOG_ERROR, "Format of input frames context (%s) is not supported by AMF.\n",
-                   av_get_pix_fmt_name(frames_ctx->sw_format));
-            return AVERROR(EINVAL);
-        }
-
-        err = av_hwdevice_ctx_create_derived(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, frames_ctx->device_ref, 0);
-        if (err < 0)
-            return err;
-
-        ctx->hwframes_in_ref = av_buffer_ref(inlink->hw_frames_ctx);
-        if (!ctx->hwframes_in_ref)
-            return AVERROR(ENOMEM);
-
-        ctx->hwframes_out_ref = av_hwframe_ctx_alloc(frames_ctx->device_ref);
-        if (!ctx->hwframes_out_ref)
-            return AVERROR(ENOMEM);
-
-        hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
-        hwframes_out->format    = outlink->format;
-        hwframes_out->sw_format = frames_ctx->sw_format;
-        pix_fmt_in = frames_ctx->sw_format;
-
-    } else if (avctx->hw_device_ctx) {
-        err = av_hwdevice_ctx_create_derived(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, avctx->hw_device_ctx, 0);
-        if (err < 0)
-            return err;
-        AVHWDeviceContext   *hwdev_ctx;
-        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
-        {
-            AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
-            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
-        }
-        ctx->hwdevice_ref = av_buffer_ref(avctx->hw_device_ctx);
-        if (!ctx->hwdevice_ref)
-            return AVERROR(ENOMEM);
-
-        ctx->hwframes_out_ref = av_hwframe_ctx_alloc(ctx->hwdevice_ref);
-        if (!ctx->hwframes_out_ref)
-            return AVERROR(ENOMEM);
-
-        hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
-        hwframes_out->format    = outlink->format;
-        hwframes_out->sw_format = inlink->format;
-        pix_fmt_in = inlink->format;
-
-    } else {
-        AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
-        ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
-                                                amf_context_internal_free, NULL, 0);
-        if ((res == amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
-            return res;
-        }
-        ctx->hwframes_out_ref = av_hwframe_ctx_alloc(ctx->amf_device_ref);
-        if (!ctx->hwframes_out_ref)
-            return AVERROR(ENOMEM);
-
-        hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
-        hwframes_out->format    = outlink->format;
-        hwframes_out->sw_format = inlink->format;
-        pix_fmt_in = inlink->format;
-    }
-
-    if (ctx->format != AV_PIX_FMT_NONE) {
-        hwframes_out->sw_format = ctx->format;
-    }
-
-    outlink->w = ctx->width;
-    outlink->h = ctx->height;
-
-    hwframes_out->width = outlink->w;
-    hwframes_out->height = outlink->h;
-
-    err = av_hwframe_ctx_init(ctx->hwframes_out_ref);
+    err = amf_init_scale_config(outlink);
     if (err < 0)
         return err;
-
-    outlink->hw_frames_ctx = av_buffer_ref(ctx->hwframes_out_ref);
-    if (!outlink->hw_frames_ctx) {
-        return AVERROR(ENOMEM);
-    }
 
     internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
     res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFVideoConverter, &ctx->scaler);
