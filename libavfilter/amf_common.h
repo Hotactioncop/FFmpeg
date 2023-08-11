@@ -49,6 +49,9 @@ typedef struct AMFScaleContext {
     AVBufferRef        *amf_device_ctx_internal;
 } AMFScaleContext;
 
+int amf_scale_init(AVFilterContext *avctx);
+void amf_scale_uninit(AVFilterContext *avctx);
+int amf_init_scale_config(AVFilterLink *outlink);
 int amf_copy_surface(AVFilterContext *avctx, const AVFrame *frame, AMFSurface* surface);
 void amf_free_amfsurface(void *opaque, uint8_t *data);
 AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface);
