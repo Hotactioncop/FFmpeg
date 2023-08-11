@@ -49,19 +49,6 @@
 #include <d3d11.h>
 #endif
 
-#define AMFAV_RETURN_IF_FALSE(avctx, exp, ret_value, /*message,*/ ...) \
-    if (!(exp)) { \
-        av_log(avctx, AV_LOG_ERROR, __VA_ARGS__); \
-        return ret_value; \
-    }
-
-#define AMFAV_GOTO_FAIL_IF_FALSE(avctx, exp, ret_value, /*message,*/ ...) \
-    if (!(exp)) { \
-        av_log(avctx, AV_LOG_ERROR, __VA_ARGS__); \
-        ret = ret_value; \
-        goto fail; \
-    }
-
 typedef struct AMFScaleContext {
     const AVClass *class;
 
@@ -115,7 +102,7 @@ static int amf_copy_surface(AVFilterContext *avctx, const AVFrame *frame,
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AMFSurface *surface = (AMFSurface*)(opaque);
-    surface->pVtbl->Release(surface);
+    //surface->pVtbl->Release(surface);
 }
 
 static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
@@ -124,7 +111,7 @@ static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pS
 
     if (!frame)
         return NULL;
-
+    /*
     switch (pSurface->pVtbl->GetMemoryType(pSurface))
     {
 #if CONFIG_D3D11VA
@@ -158,11 +145,18 @@ static AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pS
         }
         break;
 #endif
-    default:
+    default:*/
+       // FIXME: add support for other memory types
         {
-            av_assert0(0);//should not happen
+            frame->data[3] = pSurface;
+            frame->buf[0] = av_buffer_create(NULL,
+                                     0,
+                                     amf_free_amfsurface,
+                                     pSurface,
+                                     AV_BUFFER_FLAG_READONLY);
+            pSurface->pVtbl->Acquire(pSurface);
         }
-    }
+    //}
 
     return frame;
 }
@@ -190,6 +184,13 @@ static int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *fram
         }
         break;
 #endif
+    // FIXME: need to use hw_frames_ctx to get texture
+    case AV_PIX_FMT_AMF:
+        {
+            surface = (AMFSurface*)frame->data[3]; // actual surface
+            hw_surface = 1;
+        }
+        break;
 #if CONFIG_DXVA2
     case AV_PIX_FMT_DXVA2_VLD:
         {
@@ -270,9 +271,11 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_GRAY8,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_YUYV422,
+        AV_PIX_FMT_AMF,
         AV_PIX_FMT_NONE,
     };
     static const enum AVPixelFormat output_pix_fmts_default[] = {
+        AV_PIX_FMT_AMF,
         AV_PIX_FMT_D3D11,
         AV_PIX_FMT_DXVA2_VLD,
         AV_PIX_FMT_NONE,
@@ -508,7 +511,8 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->converter, AMF_VIDEO_CONVERTER_OUTPUT_TRANSFER_CHARACTERISTIC, ctx->trc);
     }
 
-    res = ctx->converter->pVtbl->Init(ctx->converter, amf_av_to_amf_format(pix_fmt_in), inlink->w, inlink->h);
+    // FIXME: add support for other formats
+    res = ctx->converter->pVtbl->Init(ctx->converter, AMF_SURFACE_NV12, inlink->w, inlink->h);
     AMFAV_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFConverter-Init() failed with error %d\n", res);
 
     return 0;
@@ -705,6 +709,8 @@ AVFilter ff_vf_scale_amf = {
 
     FILTER_INPUTS(amf_scale_inputs),
     FILTER_OUTPUTS(amf_scale_outputs),
+    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_AMF),
 
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
+    .flags          = AVFILTER_FLAG_HWDEVICE,
 };
