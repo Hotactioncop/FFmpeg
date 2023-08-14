@@ -34,11 +34,12 @@
 #include "libavutil/hwcontext_amf.h"
 
 #include "AMF/components/HQScaler.h"
+#include "AMF/components/ColorSpace.h"
 #include "amf_common.h"
 
 #include "avfilter.h"
-#include "formats.h"
 #include "internal.h"
+#include "formats.h"
 #include "video.h"
 
 #if CONFIG_DXVA2
@@ -53,9 +54,6 @@
 static int amf_scale_query_formats(AVFilterContext *avctx)
 {
     const enum AVPixelFormat *output_pix_fmts;
-    AVFilterFormats *input_formats;
-    int err;
-    int i;
     static const enum AVPixelFormat input_pix_fmts[] = {
         AV_PIX_FMT_NV12,
         AV_PIX_FMT_P010,
@@ -72,60 +70,7 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
     };
     output_pix_fmts = output_pix_fmts_default;
 
-    //in case if hw_device_ctx is set to DXVA2 we change order of pixel formats to set DXVA2 be choosen by default
-    //The order is ignored if hw_frames_ctx is not NULL on the config_output stage
-    if (avctx->hw_device_ctx) {
-        AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-
-        switch (device_ctx->type) {
-    #if CONFIG_D3D11VA
-        case AV_HWDEVICE_TYPE_D3D11VA:
-            {
-                static const enum AVPixelFormat output_pix_fmts_d3d11[] = {
-                    AV_PIX_FMT_D3D11,
-                    AV_PIX_FMT_NONE,
-                };
-                output_pix_fmts = output_pix_fmts_d3d11;
-            }
-            break;
-    #endif
-    #if CONFIG_DXVA2
-        case AV_HWDEVICE_TYPE_DXVA2:
-            {
-                static const enum AVPixelFormat output_pix_fmts_dxva2[] = {
-                    AV_PIX_FMT_DXVA2_VLD,
-                    AV_PIX_FMT_NONE,
-                };
-                output_pix_fmts = output_pix_fmts_dxva2;
-            }
-            break;
-    #endif
-        default:
-            {
-                av_log(avctx, AV_LOG_ERROR, "Unsupported device : %s\n", av_hwdevice_get_type_name(device_ctx->type));
-                return AVERROR(EINVAL);
-            }
-            break;
-        }
-    }
-
-    input_formats = ff_make_format_list(output_pix_fmts);
-    if (!input_formats) {
-        return AVERROR(ENOMEM);
-    }
-
-    for (i = 0; input_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-        err = ff_add_format(&input_formats, input_pix_fmts[i]);
-        if (err < 0)
-            return err;
-    }
-
-    if ((err = ff_formats_ref(input_formats, &avctx->inputs[0]->outcfg.formats)) < 0 ||
-        (err = ff_formats_ref(ff_make_format_list(output_pix_fmts),
-                              &avctx->outputs[0]->incfg.formats)) < 0)
-        return err;
-
-    return 0;
+    return amf_setup_input_output_formats(avctx, input_pix_fmts, output_pix_fmts);
 }
 
 static int amf_scale_config_output(AVFilterLink *outlink)
@@ -150,75 +95,17 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AMF_ASSIGN_PROPERTY_SIZE(res, ctx->scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-SetProperty() failed with error %d\n", res);
 
+    // Setup default options to skip color conversion
+    ctx->color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN;
+    ctx->color_range = AMF_COLOR_RANGE_UNDEFINED;
+    ctx->primaries = AMF_COLOR_PRIMARIES_UNDEFINED;
+    ctx->trc = AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED;
+
     // FIXME: add support for other formats
     res = ctx->scaler->pVtbl->Init(ctx->scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-Init() failed with error %d\n", res);
 
     return 0;
-}
-
-static int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
-{
-    AVFilterContext             *avctx = inlink->dst;
-    AMFScaleContext             *ctx = avctx->priv;
-    AVFilterLink                *outlink = avctx->outputs[0];
-    AMF_RESULT  res;
-    AMFSurface *surface_in;
-    AMFSurface *surface_out;
-    AMFData *data_out = NULL;
-
-    AVFrame *out = NULL;
-    int ret = 0;
-
-    if (!ctx->scaler)
-        return AVERROR(EINVAL);
-
-    ret = amf_avframe_to_amfsurface(avctx, in, &surface_in);
-    if (ret < 0)
-        goto fail;
-    res = ctx->scaler->pVtbl->SubmitInput(ctx->scaler, (AMFData*)surface_in);
-    AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
-
-    res = ctx->scaler->pVtbl->QueryOutput(ctx->scaler, &data_out);
-    AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "QueryOutput() failed with error %d\n", res);
-
-    if (data_out) {
-        AMFGuid guid = IID_AMFSurface();
-        data_out->pVtbl->QueryInterface(data_out, &guid, (void**)&surface_out); // query for buffer interface
-        data_out->pVtbl->Release(data_out);
-    }
-
-    out = amf_amfsurface_to_avframe(avctx, surface_out);
-
-    ret = av_frame_copy_props(out, in);
-
-    if (ret < 0)
-        goto fail;
-
-    out->format = outlink->format;
-    out->width  = outlink->w;
-    out->height = outlink->h;
-
-    out->hw_frames_ctx = av_buffer_ref(ctx->hwframes_out_ref);
-    if (!out->hw_frames_ctx) {
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-    surface_in->pVtbl->Release(surface_in);
-    surface_out->pVtbl->Release(surface_out);
-
-    if (inlink->sample_aspect_ratio.num) {
-        outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
-    } else
-        outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
-
-    av_frame_free(&in);
-    return ff_filter_frame(outlink, out);
-fail:
-    av_frame_free(&in);
-    av_frame_free(&out);
-    return ret;
 }
 
 #define OFFSET(x) offsetof(AMFScaleContext, x)
