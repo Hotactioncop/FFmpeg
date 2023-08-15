@@ -95,6 +95,14 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AMF_ASSIGN_PROPERTY_SIZE(res, ctx->scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-SetProperty() failed with error %d\n", res);
 
+    if (ctx->algorithm != -1) {
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->scaler, AMF_HQ_SCALER_ALGORITHM, ctx->algorithm);
+    }
+    if (ctx->sharpness != -1) {
+        AMF_ASSIGN_PROPERTY_DOUBLE(res, ctx->scaler, AMF_HQ_SCALER_SHARPNESS, ctx->sharpness);
+    }
+    AMF_ASSIGN_PROPERTY_BOOL(res, ctx->scaler, AMF_HQ_SCALER_FILL, ctx->fill);
+    AMF_ASSIGN_PROPERTY_BOOL(res, ctx->scaler, AMF_HQ_SCALER_KEEP_ASPECT_RATIO, ctx->keep_ratio);
     // Setup default options to skip color conversion
     ctx->color_profile = AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN;
     ctx->color_range = AMF_COLOR_RANGE_UNDEFINED;
@@ -114,6 +122,16 @@ static const AVOption scale_amf_hq_options[] = {
     { "w",              "Output video width",   OFFSET(w_expr),     AV_OPT_TYPE_STRING, { .str = "iw"   }, .flags = FLAGS },
     { "h",              "Output video height",  OFFSET(h_expr),     AV_OPT_TYPE_STRING, { .str = "ih"   }, .flags = FLAGS },
     { "format",         "Output pixel format",  OFFSET(format_str), AV_OPT_TYPE_STRING, { .str = "same" }, .flags = FLAGS },
+    { "sharpness",      "Sharpness",            OFFSET(sharpness),  AV_OPT_TYPE_FLOAT,  { .dbl = -1 }, -1, 2., FLAGS, "sharpness" },
+    { "keep-ratio",     "Keep aspect ratio",    OFFSET(keep_ratio), AV_OPT_TYPE_BOOL, { .i64 = 0  },  0, 1, FLAGS, "keep_ration" },
+    { "fill",           "Fill",                 OFFSET(fill),       AV_OPT_TYPE_BOOL, { .i64 = 0  },  0, 1, FLAGS, "fill" },
+    { "algorithm",      "Scaling algorithm",    OFFSET(algorithm),      AV_OPT_TYPE_INT,   { .i64 = -1 }, -1, AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1, FLAGS, "algorithm" },
+    { "bilinear",       "Bilinear",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_BILINEAR }, 0, 0, FLAGS, "algorithm" },
+    { "bicubic",        "Bicubic",              0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_BICUBIC }, 0, 0, FLAGS, "algorithm" },
+    { "sr1-0",          "Video SR1.0",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_0 }, 0, 0, FLAGS, "algorithm" },
+    { "point",          "Point",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_POINT }, 0, 0, FLAGS, "algorithm" },
+    { "sr1-1",          "Video SR1.1",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1 }, 0, 0, FLAGS, "algorithm" },
+
 
     { NULL },
 };
