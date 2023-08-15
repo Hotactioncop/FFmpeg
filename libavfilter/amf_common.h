@@ -34,6 +34,13 @@ typedef struct AMFScaleContext {
     int color_range;
     int primaries;
     int trc;
+    int fill;
+    int fill_color;
+    int keep_ratio;
+
+    // HQScaler properties
+    int algorithm;
+    float sharpness;
 
     char *w_expr;
     char *h_expr;
