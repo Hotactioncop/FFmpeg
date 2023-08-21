@@ -89,8 +89,9 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     int err;
     AMF_RESULT res;
     enum AMF_VIDEO_CONVERTER_COLOR_PROFILE_ENUM amf_color_profile;
+    enum AVPixelFormat in_format;
 
-    err = amf_init_scale_config(outlink);
+    err = amf_init_scale_config(outlink, &in_format);
     if (err < 0)
         return err;
 
@@ -154,8 +155,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->scaler, AMF_VIDEO_CONVERTER_OUTPUT_TRANSFER_CHARACTERISTIC, ctx->trc);
     }
 
-    // FIXME: add support for other formats
-    res = ctx->scaler->pVtbl->Init(ctx->scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
+    res = ctx->scaler->pVtbl->Init(ctx->scaler, amf_av_to_amf_format(in_format), inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFConverter-Init() failed with error %d\n", res);
 
     return 0;
