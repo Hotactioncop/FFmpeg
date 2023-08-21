@@ -25,6 +25,7 @@
 #include "hwconfig.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/time.h"
+#include "decode.h"
 #include "libavutil/mastering_display_metadata.h"
 
 #if CONFIG_D3D11VA
@@ -218,7 +219,6 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
         ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
         if (!ctx->hw_device_ctx)
             return AVERROR(ENOMEM);
-
     } else {
         ret = amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
         if (ret != 0) {
@@ -252,6 +252,15 @@ static int amf_decode_init(AVCodecContext *avctx)
 {
     AvAmfDecoderContext *ctx = avctx->priv_data;
     int ret;
+    enum AVPixelFormat pix_fmts[3] = {
+        AV_PIX_FMT_AMF,
+        avctx->pix_fmt,
+        AV_PIX_FMT_NONE };
+
+    ret = ff_get_format(avctx, pix_fmts);
+    if (ret < 0) {
+        avctx->pix_fmt = AV_PIX_FMT_NONE;
+    }
 
     if (avctx->hw_frames_ctx){
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
@@ -268,6 +277,32 @@ static int amf_decode_init(AVCodecContext *avctx)
             AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
+
+        if (avctx->hw_device_ctx && !avctx->hw_frames_ctx && ret == AV_PIX_FMT_AMF) {
+            AVHWFramesContext *hwframes_ctx;
+            avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
+
+            if (!avctx->hw_frames_ctx) {
+                av_log(avctx, AV_LOG_ERROR, "av_hwframe_ctx_alloc failed\n");
+                return AVERROR(ENOMEM);
+            }
+
+            hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+            hwframes_ctx->width             = FFALIGN(avctx->coded_width,  32);
+            hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
+            hwframes_ctx->format            = AV_PIX_FMT_AMF;
+            hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
+            hwframes_ctx->initial_pool_size = 0;
+
+            ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
+
+            if (ret < 0) {
+                av_log(NULL, AV_LOG_ERROR, "Error initializing a AMF frame pool\n");
+                av_buffer_unref(&avctx->hw_frames_ctx);
+                return ret;
+            }
+        }
+
     }  else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
@@ -391,6 +426,9 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     frame->pkt_dts = var.int64Value;
 
     frame->duration = surface->pVtbl->GetDuration(surface);
+
+    if (avctx->hw_frames_ctx)
+        frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS

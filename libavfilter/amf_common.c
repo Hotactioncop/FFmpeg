@@ -263,7 +263,7 @@ int amf_copy_surface(AVFilterContext *avctx, const AVFrame *frame,
     return 0;
 }
 
-int amf_init_scale_config(AVFilterLink *outlink)
+int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
 {
     AVFilterContext *avctx = outlink->src;
     AVFilterLink   *inlink = avctx->inputs[0];
@@ -330,8 +330,8 @@ int amf_init_scale_config(AVFilterLink *outlink)
             return AVERROR(ENOMEM);
 
         hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
-        hwframes_out->format    = outlink->format;
-        hwframes_out->sw_format = inlink->format;
+        hwframes_out->format    = AV_PIX_FMT_AMF;
+        hwframes_out->sw_format = outlink->format;
     } else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
@@ -351,6 +351,14 @@ int amf_init_scale_config(AVFilterLink *outlink)
     if (ctx->format != AV_PIX_FMT_NONE) {
         hwframes_out->sw_format = ctx->format;
     }
+
+    if (inlink->format == AV_PIX_FMT_AMF) {
+        if (!inlink->hw_frames_ctx || !inlink->hw_frames_ctx->data)
+            return AVERROR(EINVAL);
+        else
+            *in_format = ((AVHWFramesContext*)inlink->hw_frames_ctx->data)->sw_format;
+    } else
+        *in_format = inlink->format;
 
     outlink->w = ctx->width;
     outlink->h = ctx->height;

@@ -82,7 +82,9 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     AMFSize out_size;
     int err;
     AMF_RESULT res;
-    err = amf_init_scale_config(outlink);
+    enum AVPixelFormat in_format;
+
+    err = amf_init_scale_config(outlink, &in_format);
     if (err < 0)
         return err;
 
@@ -109,8 +111,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     ctx->primaries = AMF_COLOR_PRIMARIES_UNDEFINED;
     ctx->trc = AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED;
 
-    // FIXME: add support for other formats
-    res = ctx->scaler->pVtbl->Init(ctx->scaler, AMF_SURFACE_NV12, inlink->w, inlink->h);
+    res = ctx->scaler->pVtbl->Init(ctx->scaler, amf_av_to_amf_format(in_format), inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-Init() failed with error %d\n", res);
 
     return 0;
