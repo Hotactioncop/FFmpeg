@@ -387,55 +387,66 @@ void amf_free_amfsurface(void *opaque, uint8_t *data)
 AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
 {
     AVFrame *frame = av_frame_alloc();
+    AMFScaleContext  *ctx = avctx->priv;
 
     if (!frame)
         return NULL;
-    /*
-    switch (pSurface->pVtbl->GetMemoryType(pSurface))
-    {
-#if CONFIG_D3D11VA
-        case AMF_MEMORY_DX11:
+    if (ctx->hwframes_out_ref) {
+        AVHWFramesContext *hwframes_out = (AVHWFramesContext *)ctx->hwframes_out_ref->data;
+        if (hwframes_out->format == AV_PIX_FMT_AMF) {
+            frame->data[3] = (uint8_t *)pSurface;
+            frame->buf[0] = av_buffer_create(NULL,
+                                            0,
+                                            amf_free_amfsurface,
+                                            pSurface,
+                                            AV_BUFFER_FLAG_READONLY);
+            pSurface->pVtbl->Acquire(pSurface);
+        } else { // FIXME: add processing of other hw formats
+            av_log(ctx, AV_LOG_ERROR, "Unknown pixel format\n");
+            return NULL;
+        }
+    } else {
+        switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
-            AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
-            frame->data[0] = plane0->pVtbl->GetNative(plane0);
-            frame->data[1] = (uint8_t*)(intptr_t)0;
+    #if CONFIG_D3D11VA
+            case AMF_MEMORY_DX11:
+            {
+                AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
+                frame->data[0] = plane0->pVtbl->GetNative(plane0);
+                frame->data[1] = (uint8_t*)(intptr_t)0;
 
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
-        }
-        break;
-#endif
-#if CONFIG_DXVA2
-        case AMF_MEMORY_DX9:
-        {
-            AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
-            frame->data[3] = plane0->pVtbl->GetNative(plane0);
+                frame->buf[0] = av_buffer_create(NULL,
+                                        0,
+                                        amf_free_amfsurface,
+                                        pSurface,
+                                        AV_BUFFER_FLAG_READONLY);
+                pSurface->pVtbl->Acquire(pSurface);
+            }
+            break;
+    #endif
+    #if CONFIG_DXVA2
+            case AMF_MEMORY_DX9:
+            {
+                AMFPlane *plane0 = pSurface->pVtbl->GetPlaneAt(pSurface, 0);
+                frame->data[3] = plane0->pVtbl->GetNative(plane0);
 
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
+                frame->buf[0] = av_buffer_create(NULL,
+                                        0,
+                                        amf_free_amfsurface,
+                                        pSurface,
+                                        AV_BUFFER_FLAG_READONLY);
+                pSurface->pVtbl->Acquire(pSurface);
+            }
+            break;
+    #endif
+        default:
+            // FIXME: add support for other memory types
+            {
+                av_log(avctx, AV_LOG_ERROR, "Unsupported memory type : %d\n", pSurface->pVtbl->GetMemoryType(pSurface));
+                return NULL;
+            }
         }
-        break;
-#endif
-    default: */
-        // FIXME: add support for other memory types
-        {
-            frame->data[3] = (uint8_t *) pSurface;
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     pSurface,
-                                     AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
-        }
-    //}
+    }
 
     return frame;
 }

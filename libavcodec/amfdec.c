@@ -353,9 +353,27 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     if (!frame)
         return AMF_INVALID_POINTER;
 
-    /*switch (surface->pVtbl->GetMemoryType(surface))
+    if (avctx->hw_frames_ctx) {
+        AVHWFramesContext *hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        if (hwframes_ctx->format == AV_PIX_FMT_AMF) {
+            frame->data[3] = surface;
+            frame->format = AV_PIX_FMT_AMF;
+            frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
+            // FIXME: Need to find how to delete this buffer creation
+            frame->buf[0] = av_buffer_create(NULL,
+                                     0,
+                                     amf_free_amfsurface,
+                                     surface,
+                                     AV_BUFFER_FLAG_READONLY);
+            surface->pVtbl->Acquire(surface);
+        } else {
+            av_log(avctx, AV_LOG_ERROR, "Unknown format for hwframes_ctx\n");
+            return AVERROR(ENOMEM);
+        }
+    } else {
+        switch (surface->pVtbl->GetMemoryType(surface))
         {
-    #if CONFIG_D3D11VA
+#if CONFIG_D3D11VA
             case AMF_MEMORY_DX11:
             {
                 AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
@@ -371,8 +389,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                 surface->pVtbl->Acquire(surface);
             }
             break;
-    #endif
-    #if CONFIG_DXVA2
+#endif
+#if CONFIG_DXVA2
             case AMF_MEMORY_DX9:
             {
                 AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
@@ -406,16 +424,8 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                                                      AV_BUFFER_FLAG_READONLY);
            }
         }
-    */
-   // FIXME: this is a hack to get the surface in a format that ffmpeg can handle
-    frame->data[3] = surface;
-    frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     surface,
-                                     AV_BUFFER_FLAG_READONLY);
-    surface->pVtbl->Acquire(surface);
-    frame->format = AV_PIX_FMT_AMF; //FIXME: amf_to_av_format(surface->pVtbl->GetFormat(surface));
+        frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
+    }
 
     frame->width  = avctx->width;
     frame->height = avctx->height;
@@ -426,9 +436,6 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     frame->pkt_dts = var.int64Value;
 
     frame->duration = surface->pVtbl->GetDuration(surface);
-
-    if (avctx->hw_frames_ctx)
-        frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
