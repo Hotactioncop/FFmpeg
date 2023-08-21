@@ -143,11 +143,10 @@ static int amf_init_encoder(AVCodecContext *avctx)
     else
         pix_fmt = avctx->pix_fmt;
 
-     // FiXME: this is a hack to get the correct format for AMF HW context
     if (avctx->pix_fmt != AV_PIX_FMT_AMF)
         ctx->format = amf_av_to_amf_format(pix_fmt);
     else
-        ctx->format = AMF_SURFACE_NV12;
+        ctx->format = amf_av_to_amf_format(avctx->sw_pix_fmt);
 
     AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
                     "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
