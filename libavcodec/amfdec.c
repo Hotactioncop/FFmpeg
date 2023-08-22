@@ -292,7 +292,7 @@ static int amf_decode_init(AVCodecContext *avctx)
             hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
             hwframes_ctx->format            = AV_PIX_FMT_AMF;
             hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
-            hwframes_ctx->initial_pool_size = 0;
+            hwframes_ctx->initial_pool_size = 16 + avctx->extra_hw_frames;
 
             ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
 

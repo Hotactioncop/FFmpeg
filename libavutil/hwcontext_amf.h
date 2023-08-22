@@ -43,7 +43,7 @@ typedef struct AVAMFDeviceContextInternal {
 
     amf_uint64          version; ///< version of AMF runtime
     AMFContext         *context; ///< AMF context
-
+    AMF_MEMORY_TYPE     mem_type;
 } AVAMFDeviceContextInternal;
 
 /**
@@ -53,6 +53,11 @@ typedef struct AVAMFDeviceContextInternal {
 typedef struct AVAMFDeviceContext {
     AVBufferRef        *internal;
 } AVAMFDeviceContext;
+
+typedef struct AMFFramesContext {
+    AMFSurface * surfaces;
+    int            nb_surfaces;
+} AMFFramesContext;
 
 /**
 * Error handling helper
