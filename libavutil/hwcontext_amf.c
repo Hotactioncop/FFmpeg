@@ -126,11 +126,6 @@ enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt)
     return AMF_SURFACE_UNKNOWN;
 }
 
-typedef struct AMFFramesContext {
-    AMFSurface * surfaces;
-    int            nb_surfaces;
-} AMFFramesContext;
-
 static const enum AVPixelFormat supported_formats[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
@@ -176,17 +171,25 @@ static void amf_buffer_free(void *opaque, uint8_t *data)
 
 static AVBufferRef *amf_pool_alloc(void *opaque, size_t size)
 {
-    // AVHWFramesContext        *ctx = opaque;
-    // AMFFramesContext *frames_ctx = ctx->internal->priv;
-    // AVHWDeviceContext    *hwctx = device_ctx->hwctx;
+    AVHWFramesContext *hwfc = (AVHWFramesContext *)opaque;
+    AVAMFDeviceContext *hwctx = hwfc->device_ctx->hwctx;
+    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )hwctx->internal->data;
+    AMFSurface *surface;
+    AMF_RESULT res;
+    AVBufferRef *buf;
 
-    // if (frames_ctx->nb_surfaces_used < frames_ctx->nb_surfaces) {
-    //     frames_ctx->nb_surfaces_used++;
-    //     return av_buffer_create((uint8_t*)(s->surfaces_internal + s->nb_surfaces_used - 1),
-    //                             sizeof(*hwctx->surfaces), amf_buffer_free, NULL, 0);
-    // }
-
-    return NULL;
+    res = internal->context->pVtbl->AllocSurface(internal->context, internal->mem_type, amf_av_to_amf_format(hwfc->sw_format), hwfc->width, hwfc->height, &surface);
+    if (res != AMF_OK) {
+        av_log(hwfc, AV_LOG_ERROR, "Failed to allocate AMF surface: %d\n", res);
+        return NULL;
+    }
+    buf = av_buffer_create((uint8_t *)surface, sizeof(AMFSurface*), &amf_buffer_free, NULL, 0);
+    if (!buf) {
+        av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer for AMF surface.\n");
+        return NULL;
+    }
+    buf->data = surface;
+    return buf;
 }
 
 static int amf_frames_init(AVHWFramesContext *ctx)
@@ -385,7 +388,7 @@ static int amf_init_from_dxva2_device(AVAMFDeviceContextInternal * internal, AVD
             av_log(hwctx, AV_LOG_ERROR, "AMF failed to initialise on given D3D9 device: %d.\n", res);
         return AVERROR(ENODEV);
     }
-
+    internal->mem_type = AMF_MEMORY_DX9;
     return 0;
 }
 #endif
@@ -402,7 +405,7 @@ static int amf_init_from_d3d11_device(AVAMFDeviceContextInternal* internal, AVD3
             av_log(hwctx, AV_LOG_ERROR, "AMF failed to initialise on the given D3D11 device: %d.\n", res);
         return AVERROR(ENODEV);
     }
-
+    internal->mem_type = AMF_MEMORY_DX11;
     return 0;
 }
 #endif
@@ -414,10 +417,12 @@ int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
 
     res = internal->context->pVtbl->InitDX11(internal->context, NULL, AMF_DX11_1);
     if (res == AMF_OK) {
+        internal->mem_type = AMF_MEMORY_DX11;
         av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D11.\n");
     } else {
         res = internal->context->pVtbl->InitDX9(internal->context, NULL);
         if (res == AMF_OK) {
+            internal->mem_type = AMF_MEMORY_DX9;
             av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via D3D9.\n");
         } else {
             AMFGuid guid = IID_AMFContext1();
@@ -433,6 +438,7 @@ int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
                     av_log(avcl, AV_LOG_ERROR, "AMF failed to initialise on the given Vulkan device: %d.\n", res);
                  return AVERROR(ENOSYS);
             }
+            internal->mem_type = AMF_MEMORY_VULKAN;
             av_log(avcl, AV_LOG_VERBOSE, "AMF initialisation succeeded via Vulkan.\n");
          }
      }
