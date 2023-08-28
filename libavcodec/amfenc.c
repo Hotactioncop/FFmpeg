@@ -305,6 +305,10 @@ int ff_amf_encode_init(AVCodecContext *avctx)
 {
     int ret;
     AmfContext *ctx = avctx->priv_data;
+    AVHWDeviceContext   *hwdev_ctx = NULL;
+    if (avctx->hw_device_ctx) {
+        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+    }
     ctx->delayed_frame = av_frame_alloc();
     if (!ctx->delayed_frame) {
         return AVERROR(ENOMEM);
@@ -329,15 +333,10 @@ int ff_amf_encode_init(AVCodecContext *avctx)
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
          }
      }
-    else if  (avctx->hw_device_ctx) {
-        AVHWDeviceContext   *hwdev_ctx;
-        hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-        if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
-        {
-            AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
-            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
-        }
-    }  else {
+    else if (avctx->hw_device_ctx && hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF) {
+        AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
+        ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+    } else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
                                                 amf_context_internal_free, NULL, 0);

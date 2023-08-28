@@ -63,6 +63,7 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_RGBA,
         AV_PIX_FMT_GRAY8,
         AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_YUV420P10,
         AV_PIX_FMT_YUYV422,
         AV_PIX_FMT_AMF,
         AV_PIX_FMT_NONE,
