@@ -129,6 +129,8 @@ enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt)
 static const enum AVPixelFormat supported_formats[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_P010,
+    AV_PIX_FMT_YUV420P10,
 #if CONFIG_D3D11VA
     AV_PIX_FMT_D3D11,
 #endif

@@ -45,7 +45,6 @@
 #define propNotFound 0
 
 const enum AVPixelFormat amf_dec_pix_fmts[] = {
-    AV_PIX_FMT_NV12,
     AV_PIX_FMT_YUV420P,
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_BGRA,
@@ -59,8 +58,6 @@ const enum AVPixelFormat amf_dec_pix_fmts[] = {
     AV_PIX_FMT_YUV420P10,
     AV_PIX_FMT_YUV420P12,
     AV_PIX_FMT_YUV420P16,
-    AV_PIX_FMT_YUV422P10LE,
-    AV_PIX_FMT_YUV444P10LE,
 #if CONFIG_D3D11VA
     AV_PIX_FMT_D3D11,
 #endif
@@ -101,7 +98,10 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMFBuffer               *buffer;
     amf_int64               color_profile;
 
-    output_format = amf_av_to_amf_format(avctx->pix_fmt);
+    if (avctx->pix_fmt == AV_PIX_FMT_AMF)
+        output_format = amf_av_to_amf_format(avctx->sw_pix_fmt);
+    else
+        output_format = amf_av_to_amf_format(avctx->pix_fmt);
 
     if (output_format == AMF_SURFACE_UNKNOWN)
         output_format = AMF_SURFACE_NV12;
@@ -269,7 +269,7 @@ static int amf_decode_init(AVCodecContext *avctx)
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
     }
-    else if  (avctx->hw_device_ctx) {
+    else if  (avctx->hw_device_ctx && !avctx->hw_frames_ctx && ret == AV_PIX_FMT_AMF) {
         AVHWDeviceContext   *hwdev_ctx;
         hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
         if (hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF)
@@ -278,7 +278,7 @@ static int amf_decode_init(AVCodecContext *avctx)
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
 
-        if (avctx->hw_device_ctx && !avctx->hw_frames_ctx && ret == AV_PIX_FMT_AMF) {
+        //if (avctx->hw_device_ctx && !avctx->hw_frames_ctx && ret == AV_PIX_FMT_AMF) {
             AVHWFramesContext *hwframes_ctx;
             avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
 
@@ -293,6 +293,7 @@ static int amf_decode_init(AVCodecContext *avctx)
             hwframes_ctx->format            = AV_PIX_FMT_AMF;
             hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
             hwframes_ctx->initial_pool_size = 16 + avctx->extra_hw_frames;
+            avctx->pix_fmt = AV_PIX_FMT_AMF;
 
             ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
 
@@ -301,13 +302,12 @@ static int amf_decode_init(AVCodecContext *avctx)
                 av_buffer_unref(&avctx->hw_frames_ctx);
                 return ret;
             }
-        }
-
+       // }
     }  else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
                                                 amf_context_internal_free, NULL, 0);
-        if ((ret == amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+        if ((ret = amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
             amf_decode_close(avctx);
             return ret;
         }
@@ -371,59 +371,20 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
             return AVERROR(ENOMEM);
         }
     } else {
-        switch (surface->pVtbl->GetMemoryType(surface))
-        {
-#if CONFIG_D3D11VA
-            case AMF_MEMORY_DX11:
-            {
-                AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
-                frame->data[0] = plane0->pVtbl->GetNative(plane0);
-                frame->linesize[0] = plane0->pVtbl->GetHPitch(plane0);
-                frame->data[1] = (uint8_t*)(intptr_t)0;
+        ret = surface->pVtbl->Convert(surface, AMF_MEMORY_HOST);
+        AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
-                frame->buf[0] = av_buffer_create(NULL,
-                                         0,
-                                         amf_free_amfsurface,
-                                         surface,
-                                         AV_BUFFER_FLAG_READONLY);
-                surface->pVtbl->Acquire(surface);
-            }
-            break;
-#endif
-#if CONFIG_DXVA2
-            case AMF_MEMORY_DX9:
-            {
-                AMFPlane *plane0 = surface->pVtbl->GetPlaneAt(surface, 0);
-                frame->data[3] = plane0->pVtbl->GetNative(plane0);
-
-                frame->buf[0] = av_buffer_create(NULL,
-                                         0,
-                                         amf_free_amfsurface,
-                                         surface,
-                                         AV_BUFFER_FLAG_READONLY);
-                surface->pVtbl->Acquire(surface);
-            }
-            break;
-    #endif
-        default:
-            {
-                ret = surface->pVtbl->Convert(surface, AMF_MEMORY_HOST);
-                AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
-
-                for (i = 0; i < surface->pVtbl->GetPlanesCount(surface); i++)
-                {
-                    plane = surface->pVtbl->GetPlaneAt(surface, i);
-                    frame->data[i] = plane->pVtbl->GetNative(plane);
-                    frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
-                }
-                surface->pVtbl->Acquire(surface);
-                frame->buf[0] = av_buffer_create(NULL,
-                                                     0,
-                                                     amf_free_amfsurface,
-                                                     surface,
-                                                     AV_BUFFER_FLAG_READONLY);
-           }
+        for (i = 0; i < surface->pVtbl->GetPlanesCount(surface); i++) {
+            plane = surface->pVtbl->GetPlaneAt(surface, i);
+            frame->data[i] = plane->pVtbl->GetNative(plane);
+            frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
         }
+        surface->pVtbl->Acquire(surface);
+        frame->buf[0] = av_buffer_create(NULL,
+                                         0,
+                                         amf_free_amfsurface,
+                                         surface,
+                                         AV_BUFFER_FLAG_READONLY);
         frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
     }
 
@@ -497,7 +458,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
         }
     }
 
-    return ret;
+    return AMF_OK;
 }
 
 static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
