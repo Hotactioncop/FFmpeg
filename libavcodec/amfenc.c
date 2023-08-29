@@ -308,6 +308,9 @@ int ff_amf_encode_init(AVCodecContext *avctx)
     AVHWDeviceContext   *hwdev_ctx = NULL;
     if (avctx->hw_device_ctx) {
         hwdev_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
+    } else if (avctx->hw_frames_ctx) {
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        hwdev_ctx = (AVHWDeviceContext*)frames_ctx->device_ctx;
     }
     ctx->delayed_frame = av_frame_alloc();
     if (!ctx->delayed_frame) {
@@ -326,14 +329,12 @@ int ff_amf_encode_init(AVCodecContext *avctx)
     ctx->hwsurfaces_in_queue = 0;
     ctx->hwsurfaces_in_queue_max = 16;
 
-    if (avctx->hw_frames_ctx){
+    if (avctx->hw_frames_ctx && hwdev_ctx && hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF) {
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-        if (frames_ctx->device_ctx->type == AV_HWDEVICE_TYPE_AMF) {
-            AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
-            ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
-         }
-     }
-    else if (avctx->hw_device_ctx && hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF) {
+        AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
+        ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
+    }
+    else if (avctx->hw_device_ctx && hwdev_ctx && hwdev_ctx->type == AV_HWDEVICE_TYPE_AMF) {
         AVAMFDeviceContext * amf_ctx =  hwdev_ctx->hwctx;
         ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
     } else {
