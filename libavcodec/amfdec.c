@@ -196,7 +196,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer = NULL;
         }
     }
-
+AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 16);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -297,7 +297,7 @@ static int amf_decode_init(AVCodecContext *avctx)
             hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
             hwframes_ctx->format            = AV_PIX_FMT_AMF;
             hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
-            hwframes_ctx->initial_pool_size = 16 + avctx->extra_hw_frames;
+            hwframes_ctx->initial_pool_size = 8 + avctx->extra_hw_frames;
             avctx->pix_fmt = AV_PIX_FMT_AMF;
 
             ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
@@ -353,44 +353,45 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     AMFVariantStruct    var = {0};
     AMFPlane            *plane;
     int                 i;
-    AMF_RESULT          ret = AMF_OK;
-
-    if (!frame)
-        return AMF_INVALID_POINTER;
+    int ret;
+    AVFrame             *data = NULL;
 
     if (avctx->hw_frames_ctx) {
         AVHWFramesContext *hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
         if (hwframes_ctx->format == AV_PIX_FMT_AMF) {
+            ret = ff_get_buffer(avctx, frame, AV_GET_BUFFER_FLAG_REF);
+            if (ret < 0) {
+                av_log(avctx, AV_LOG_ERROR, "Get hw frame failed.\n");
+                return ret;
+            }
             frame->data[3] = surface;
-            frame->format = AV_PIX_FMT_AMF;
-            frame->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
-            // FIXME: Need to find how to delete this buffer creation
-            frame->buf[0] = av_buffer_create(NULL,
-                                     0,
-                                     amf_free_amfsurface,
-                                     surface,
-                                     AV_BUFFER_FLAG_READONLY);
-            surface->pVtbl->Acquire(surface);
         } else {
             av_log(avctx, AV_LOG_ERROR, "Unknown format for hwframes_ctx\n");
             return AVERROR(ENOMEM);
         }
     } else {
+        data = av_frame_alloc();
         ret = surface->pVtbl->Convert(surface, AMF_MEMORY_HOST);
-        AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AMF_UNEXPECTED, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
+        AMF_RETURN_IF_FALSE(avctx, ret == AMF_OK, AVERROR_UNKNOWN, "Convert(amf::AMF_MEMORY_HOST) failed with error %d\n", ret);
 
         for (i = 0; i < surface->pVtbl->GetPlanesCount(surface); i++) {
             plane = surface->pVtbl->GetPlaneAt(surface, i);
             frame->data[i] = plane->pVtbl->GetNative(plane);
             frame->linesize[i] = plane->pVtbl->GetHPitch(plane);
         }
-        surface->pVtbl->Acquire(surface);
-        frame->buf[0] = av_buffer_create(NULL,
-                                         0,
-                                         amf_free_amfsurface,
-                                         surface,
-                                         AV_BUFFER_FLAG_READONLY);
+        surface->pVtbl->Release(surface);
+        surface = NULL;
+
+        // frame->buf[0] = av_buffer_create(NULL,
+        //                                  0,
+        //                                  amf_free_amfsurface,
+        //                                  0,
+        //                                  AV_BUFFER_FLAG_READONLY);
         frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
+        av_frame_move_ref(frame, data);
+        if (data) {
+            av_frame_free(&data);
+        }
     }
 
     frame->width  = avctx->width;
@@ -413,7 +414,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     frame->color_range = avctx->color_range;
-
+   // frame->flags = 0;
     frame->colorspace = avctx->colorspace;
     frame->color_trc = avctx->color_trc;
     frame->color_primaries = avctx->color_primaries;
@@ -462,8 +463,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             }
         }
     }
-
-    return AMF_OK;
+    return 0;
 }
 
 static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
@@ -471,21 +471,17 @@ static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMF_RESULT          ret = AMF_OK;
     AMFSurface          *surface = NULL;
-    AVFrame             *data = NULL;
     AMFData             *data_out = NULL;
-
-    if (!ctx->decoder)
-        return AVERROR(EINVAL);
+    AMFVariantStruct    var = {0};
 
     ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
-
+    if (ret != AMF_OK) {
+        av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned %d\n", ret);
+        return ret;
+    }
     if (data_out == NULL) {
         av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned empty data\n");
         return AMF_FAIL;
-    }
-    if (ret == AMF_EOF) {
-        av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned AMF_EOF\n");
-        return AMF_EOF;
     }
 
     if (data_out) {
@@ -495,15 +491,11 @@ static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
         data_out = NULL;
     }
 
-    data = av_frame_alloc();
-    ret = amf_amfsurface_to_avframe(avctx, surface, data);
-    AMF_GOTO_FAIL_IF_FALSE(avctx, ret == AMF_OK, AVERROR_UNKNOWN, "Failed to convert AMFSurface to AVFrame");
-
-    av_frame_move_ref(frame, data);
+    ret = amf_amfsurface_to_avframe(avctx, surface, frame);
+    AMF_GOTO_FAIL_IF_FALSE(avctx, ret >= 0, AMF_FAIL, "Failed to convert AMFSurface to AVFrame = %d\n", ret);
+    return AMF_OK;
 fail:
-    if (data) {
-        av_frame_free(&data);
-    }
+
     if (surface) {
         surface->pVtbl->Release(surface);
         surface = NULL;
@@ -566,6 +558,10 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     AVFrame             *frame = data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
+    int frameSubmited = 0;
+
+    if (!ctx->decoder)
+        return AVERROR(EINVAL);
 
     if (!avpkt->size && ctx->drained == 0) {
         ctx->decoder->pVtbl->Drain(ctx->decoder);
@@ -579,11 +575,20 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         // FIXME: check other return values
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
+            frameSubmited = 1;
             *got_frame = 0;
         }
+
         buf->pVtbl->Release(buf);
         buf = NULL;
+        if (res == AMF_INPUT_FULL) { // handle full queue
+            *got_frame = 0;
+            //return AVERROR(EAGAIN);
+        }
     }
+    // while (!*got_frame) {
+
+    // }
 
     while(1) {
         res = amf_receive_frame(avctx, frame);
@@ -592,11 +597,14 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
             *got_frame = 1;
             break;
         } else if (res == AMF_FAIL || res == AMF_EOF) {
+            return AVERROR(EAGAIN);
             break;
         } else {
             AMF_RETURN_IF_FALSE(avctx, res, 0, "Unkown result from QueryOutput");
         }
     }
+    if (!frameSubmited)
+        return AVERROR(EAGAIN);
     return avpkt->size;
 }
 

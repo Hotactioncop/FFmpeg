@@ -167,30 +167,19 @@ static int amf_frames_get_constraints(AVHWDeviceContext *ctx,
 
 static void amf_buffer_free(void *opaque, uint8_t *data)
 {
-    AMFSurface *surf = (AMFSurface *)data;
-    surf->pVtbl->Release(surf);
+
 }
 
 static AVBufferRef *amf_pool_alloc(void *opaque, size_t size)
 {
     AVHWFramesContext *hwfc = (AVHWFramesContext *)opaque;
-    AVAMFDeviceContext *hwctx = hwfc->device_ctx->hwctx;
-    AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )hwctx->internal->data;
-    AMFSurface *surface;
-    AMF_RESULT res;
     AVBufferRef *buf;
 
-    res = internal->context->pVtbl->AllocSurface(internal->context, internal->mem_type, amf_av_to_amf_format(hwfc->sw_format), hwfc->width, hwfc->height, &surface);
-    if (res != AMF_OK) {
-        av_log(hwfc, AV_LOG_ERROR, "Failed to allocate AMF surface: %d\n", res);
-        return NULL;
-    }
-    buf = av_buffer_create((uint8_t *)surface, sizeof(AMFSurface*), &amf_buffer_free, NULL, 0);
+    buf = av_buffer_create(NULL, sizeof(AMFSurface*), amf_buffer_free, hwfc, AV_BUFFER_FLAG_READONLY);
     if (!buf) {
         av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer for AMF surface.\n");
         return NULL;
     }
-    buf->data = surface;
     return buf;
 }
 
@@ -226,7 +215,6 @@ static int amf_get_buffer(AVHWFramesContext *ctx, AVFrame *frame)
     frame->format  = AV_PIX_FMT_AMF;
     frame->width   = ctx->width;
     frame->height  = ctx->height;
-
     return 0;
 }
 
@@ -260,7 +248,7 @@ static int amf_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
     int w = FFMIN(dst->width,  src->width);
     int h = FFMIN(dst->height, src->height);
 
-    planes = surface->pVtbl->GetPlanesCount(surface);
+    planes = (int)surface->pVtbl->GetPlanesCount(surface);
     av_assert0(planes < FF_ARRAY_ELEMS(dst_data));
 
     for (i = 0; i < planes; i++) {
@@ -287,7 +275,7 @@ static int amf_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
     int h = FFMIN(dst->height, src->height);
 
 
-    planes = surface->pVtbl->GetPlanesCount(surface);
+    planes = (int)surface->pVtbl->GetPlanesCount(surface);
     av_assert0(planes < FF_ARRAY_ELEMS(src_data));
 
     for (i = 0; i < planes; i++) {
@@ -333,7 +321,7 @@ static int amf_device_create(AVHWDeviceContext *device_ctx,
     amf_device_uninit(device_ctx);
     return ret;
 }
- 
+
 static int amf_device_derive(AVHWDeviceContext *device_ctx,
                               AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
                               int flags)
