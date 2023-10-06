@@ -400,7 +400,6 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
                                             amf_free_amfsurface,
                                             pSurface,
                                             AV_BUFFER_FLAG_READONLY);
-            pSurface->pVtbl->Acquire(pSurface);
         } else { // FIXME: add processing of other hw formats
             av_log(ctx, AV_LOG_ERROR, "Unknown pixel format\n");
             return NULL;
@@ -420,7 +419,6 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
                                         amf_free_amfsurface,
                                         pSurface,
                                         AV_BUFFER_FLAG_READONLY);
-                pSurface->pVtbl->Acquire(pSurface);
             }
             break;
     #endif
@@ -435,7 +433,6 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
                                         amf_free_amfsurface,
                                         pSurface,
                                         AV_BUFFER_FLAG_READONLY);
-                pSurface->pVtbl->Acquire(pSurface);
             }
             break;
     #endif

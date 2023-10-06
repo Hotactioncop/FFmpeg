@@ -441,10 +441,9 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     int         block_and_wait;
     int         query_output_data_flag = 0;
     AMF_RESULT  res_resubmit;
-
+    int count = 0;
     if (!ctx->encoder)
         return AVERROR(EINVAL);
-
     if (!frame->buf[0]) {
         ret = ff_encode_get_frame(avctx, frame);
         if (ret < 0 && ret != AVERROR_EOF)
@@ -505,7 +504,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 #endif
         case AV_PIX_FMT_AMF:
             {
-                surface = frame->data[3]; // actual texture
+                surface = (AMFSurface*)frame->data[3];
+                //surface->pVtbl->SetCrop(surface, 0, 0, frame->width, frame->height);
                 hw_surface = 1;
             }
             break;
@@ -533,7 +533,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             frame_ref_storage_buffer->pVtbl->Release(frame_ref_storage_buffer);
         }
 
- 
+
         // HDR10 metadata
         if (frame->color_trc == AVCOL_TRC_SMPTE2084) {
             AMFBuffer * hdrmeta_buffer = NULL;
@@ -575,9 +575,9 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             ctx->delayed_surface = surface;
         } else {
             int64_t pts = frame->pts;
-            surface->pVtbl->Release(surface);
+            count = surface->pVtbl->Release(surface);
+            av_log(ctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
             AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
-
             av_frame_unref(frame);
             ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
             if (ret < 0)
@@ -606,7 +606,6 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
                 amf_release_buffer_with_frame_ref(frame_ref_storage_buffer);
                 ctx->hwsurfaces_in_queue--;
             }
-
             data->pVtbl->Release(data);
 
             AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
