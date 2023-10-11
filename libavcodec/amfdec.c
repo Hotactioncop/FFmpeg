@@ -475,7 +475,7 @@ static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     AMFVariantStruct    var = {0};
 
     ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
-    if (ret != AMF_OK) {
+    if (ret != AMF_OK && ret != AMF_REPEAT) {
         av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned %d\n", ret);
         return ret;
     }
@@ -558,7 +558,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     AVFrame             *frame = data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
-    int frameSubmited = 0;
 
     if (!ctx->decoder)
         return AVERROR(EINVAL);
@@ -567,7 +566,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         ctx->decoder->pVtbl->Drain(ctx->decoder);
         ctx->drained = 1;
     }
-
     if (avpkt->size > 0) {
         res = amf_buffer_from_packet(avctx, avpkt, &buf);
         AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, 0, "Cannot convert AVPacket to AMFbuffer");
@@ -575,36 +573,26 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         // FIXME: check other return values
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
-            frameSubmited = 1;
             *got_frame = 0;
+        } else {
+            av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d\n", res);
         }
 
         buf->pVtbl->Release(buf);
         buf = NULL;
         if (res == AMF_INPUT_FULL) { // handle full queue
             *got_frame = 0;
-            //return AVERROR(EAGAIN);
         }
     }
-    // while (!*got_frame) {
 
-    // }
-
-    while(1) {
-        res = amf_receive_frame(avctx, frame);
-        if (res == AMF_OK) {
-            AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
-            *got_frame = 1;
-            break;
-        } else if (res == AMF_FAIL || res == AMF_EOF) {
-            return AVERROR(EAGAIN);
-            break;
-        } else {
-            AMF_RETURN_IF_FALSE(avctx, res, 0, "Unkown result from QueryOutput");
-        }
+    res = amf_receive_frame(avctx, frame);
+    if (res == AMF_OK) {
+        AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
+        *got_frame = 1;
+    } else if (res != AMF_EOF && res == AMF_FAIL) {
+        av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
-    if (!frameSubmited)
-        return AVERROR(EAGAIN);
+
     return avpkt->size;
 }
 
