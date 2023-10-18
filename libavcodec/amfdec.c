@@ -196,7 +196,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer = NULL;
         }
     }
-AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 16);
+AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 20);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -414,7 +414,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     frame->color_range = avctx->color_range;
-   // frame->flags = 0;
+   frame->flags = 0;
     frame->colorspace = avctx->colorspace;
     frame->color_trc = avctx->color_trc;
     frame->color_primaries = avctx->color_primaries;
@@ -550,7 +550,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
 
     return amf_update_buffer_properties(avctx, buf, pkt);
 }
-
+static int submitedCount = 0;
 static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
                        int *got_frame, AVPacket *avpkt)
 {
@@ -587,8 +587,11 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
 
     res = amf_receive_frame(avctx, frame);
     if (res == AMF_OK) {
+        av_log(avctx, AV_LOG_ERROR, "Submited decoder Count %d\n", submitedCount++);
         AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
         *got_frame = 1;
+        frame->coded_picture_number = submitedCount - 1;
+        dump_avframe_to_json(frame, "C:/msys64/home/user/ffmpeg-dumps/decoded", submitedCount - 1);
     } else if (res != AMF_EOF && res == AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }

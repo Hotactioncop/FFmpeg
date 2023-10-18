@@ -28,6 +28,7 @@
 #include "libavutil/hwcontext.h"
 
 #define FFMPEG_AMF_WRITER_ID L"ffmpeg_amf"
+void dump_avframe_to_json(const AVFrame *frame, const char *dir, int frameNum);
 
 typedef struct AmfTraceWriter {
     AMFTraceWriterVtbl  *vtbl;

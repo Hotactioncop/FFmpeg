@@ -427,9 +427,10 @@ static void amf_release_buffer_with_frame_ref(AMFBuffer *frame_ref_storage_buffe
     av_frame_free(&frame_ref);
     frame_ref_storage_buffer->pVtbl->Release(frame_ref_storage_buffer);
 }
-
+static int submitedCount2 = 0;
 int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 {
+    av_log(avctx, AV_LOG_ERROR, "Submited encoder Count %d\n", submitedCount2++);
     AmfContext *ctx = avctx->priv_data;
     AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data;
     AMFSurface *surface;
@@ -449,6 +450,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         if (ret < 0 && ret != AVERROR_EOF)
             return ret;
     }
+    dump_avframe_to_json(frame, "C:/msys64/home/user/ffmpeg-dumps/encoded", frame->coded_picture_number);
 
     if (!frame->buf[0]) { // submit drain
         if (!ctx->eof) { // submit drain one time only
