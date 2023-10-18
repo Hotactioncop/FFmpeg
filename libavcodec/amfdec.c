@@ -195,8 +195,10 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer->pVtbl->Release(buffer);
             buffer = NULL;
         }
-    }
-AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 20);
+    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 20);
+    //AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_REORDER_MODE, AMF_VIDEO_DECODER_MODE_LOW_LATENCY);
+    //AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_TIMESTAMP_MODE, AMF_TS_DECODE);
+
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -397,12 +399,12 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     frame->width  = avctx->width;
     frame->height = avctx->height;
 
-    frame->pts = surface->pVtbl->GetPts(surface);
+    frame->pts = av_rescale_q(surface->pVtbl->GetPts(surface), AMF_TIME_BASE_Q, avctx->pkt_timebase);
 
     surface->pVtbl->GetProperty(surface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
 
-    frame->duration = surface->pVtbl->GetDuration(surface);
+    frame->duration = av_rescale_q(surface->pVtbl->GetDuration(surface), AMF_TIME_BASE_Q, avctx->pkt_timebase);
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -414,7 +416,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     frame->color_range = avctx->color_range;
-   frame->flags = 0;
+    frame->flags = 0;
     frame->colorspace = avctx->colorspace;
     frame->color_trc = avctx->color_trc;
     frame->color_primaries = avctx->color_primaries;
@@ -513,8 +515,10 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
 
     AMF_RETURN_IF_FALSE(ctxt, buffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pkt != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
-    buffer->pVtbl->SetPts(buffer, pkt->pts);
-    buffer->pVtbl->SetDuration(buffer, pkt->duration);
+    int64_t pts = av_rescale_q(pkt->pts, avctx->pkt_timebase, AMF_TIME_BASE_Q);
+    buffer->pVtbl->SetPts(buffer, pts);
+    int64_t duration = av_rescale_q(pkt->duration, avctx->pkt_timebase, AMF_TIME_BASE_Q);
+    buffer->pVtbl->SetDuration(buffer, duration);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:dts", pkt->dts);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:size", pkt->size);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:pos", pkt->pos);
@@ -558,6 +562,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     AVFrame             *frame = data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
+    int frameSubmited = 0;
 
     if (!ctx->decoder)
         return AVERROR(EINVAL);
@@ -573,7 +578,10 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         // FIXME: check other return values
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
+            frameSubmited = 1;
             *got_frame = 0;
+        } else if (res == AMF_DECODER_NO_FREE_SURFACES) {
+            av_usleep(1000); // wait and poll again
         } else {
             av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d\n", res);
         }
@@ -595,6 +603,9 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     } else if (res != AMF_EOF && res == AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
+
+    //if (!frameSubmited)
+    //    return AVERROR(EAGAIN);
 
     return avpkt->size;
 }
