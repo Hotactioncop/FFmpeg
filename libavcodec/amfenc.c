@@ -577,8 +577,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
             ctx->delayed_surface = surface;
         } else {
             int64_t pts = frame->pts;
-            count = surface->pVtbl->Release(surface);
-            av_log(ctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
+            //count = surface->pVtbl->Release(surface);
+            //av_log(ctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
             AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
             av_frame_unref(frame);
             ret = av_fifo_write(ctx->timestamp_list, &pts, 1);

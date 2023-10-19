@@ -83,8 +83,11 @@ static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
 
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
-    AMFSurface *surface = (AMFSurface*)(opaque);
+    AVCodecContext *avctx = (AVCodecContext *)opaque;
+    AMFSurface *surface = (AMFSurface*)(data);
     //FIXME: release shared surface properly
+    int count = surface->pVtbl->Release(surface);
+    av_log(avctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
     //surface->pVtbl->Release(surface);
 }
 
@@ -195,10 +198,8 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer->pVtbl->Release(buffer);
             buffer = NULL;
         }
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 20);
-    //AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_REORDER_MODE, AMF_VIDEO_DECODER_MODE_LOW_LATENCY);
-    //AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_TIMESTAMP_MODE, AMF_TS_DECODE);
-
+    }
+    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 16);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -366,6 +367,9 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                 av_log(avctx, AV_LOG_ERROR, "Get hw frame failed.\n");
                 return ret;
             }
+            frame->buf[1] = av_buffer_create((uint8_t *)surface, sizeof(AMFSurface),
+                                     amf_free_amfsurface, (void*)avctx,
+                                     AV_BUFFER_FLAG_READONLY);
             frame->data[3] = surface;
         } else {
             av_log(avctx, AV_LOG_ERROR, "Unknown format for hwframes_ctx\n");
@@ -399,12 +403,14 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
     frame->width  = avctx->width;
     frame->height = avctx->height;
 
-    frame->pts = av_rescale_q(surface->pVtbl->GetPts(surface), AMF_TIME_BASE_Q, avctx->pkt_timebase);
+    frame->pts = surface->pVtbl->GetPts(surface);
 
     surface->pVtbl->GetProperty(surface, L"FFMPEG:dts", &var);
     frame->pkt_dts = var.int64Value;
 
-    frame->duration = av_rescale_q(surface->pVtbl->GetDuration(surface), AMF_TIME_BASE_Q, avctx->pkt_timebase);
+    frame->duration = surface->pVtbl->GetDuration(surface);
+    if (frame->duration < 0)
+        frame->duration = 0;
 
 #if FF_API_FRAME_PKT
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -515,10 +521,8 @@ static AMF_RESULT amf_update_buffer_properties(AVCodecContext *avctx, AMFBuffer*
 
     AMF_RETURN_IF_FALSE(ctxt, buffer != NULL, AMF_INVALID_ARG, "update_buffer_properties() - buffer not passed in");
     AMF_RETURN_IF_FALSE(ctxt, pkt != NULL, AMF_INVALID_ARG, "update_buffer_properties() - packet not passed in");
-    int64_t pts = av_rescale_q(pkt->pts, avctx->pkt_timebase, AMF_TIME_BASE_Q);
-    buffer->pVtbl->SetPts(buffer, pts);
-    int64_t duration = av_rescale_q(pkt->duration, avctx->pkt_timebase, AMF_TIME_BASE_Q);
-    buffer->pVtbl->SetDuration(buffer, duration);
+    buffer->pVtbl->SetPts(buffer, pkt->pts);
+    buffer->pVtbl->SetDuration(buffer, pkt->duration);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:dts", pkt->dts);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:size", pkt->size);
     AMF_ASSIGN_PROPERTY_INT64(res, buffer, L"FFMPEG:pos", pkt->pos);
@@ -547,8 +551,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
     mem = buf->pVtbl->GetNative(buf);
     AMF_RETURN_IF_FALSE(ctxt, mem != NULL, AMF_INVALID_POINTER, "amf_buffer_from_packet() - GetNative failed");
 
-    // copy the packet memory and don't forget to
-    // clear data padding like it is done by FFMPEG
+    // copy the packet memory and clear data padding
     memcpy(mem, pkt->data, pkt->size);
     memset((amf_int8*)(mem)+pkt->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 
@@ -562,7 +565,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     AVFrame             *frame = data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
-    int frameSubmited = 0;
 
     if (!ctx->decoder)
         return AVERROR(EINVAL);
@@ -578,10 +580,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         // FIXME: check other return values
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
-            frameSubmited = 1;
             *got_frame = 0;
-        } else if (res == AMF_DECODER_NO_FREE_SURFACES) {
-            av_usleep(1000); // wait and poll again
         } else {
             av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d\n", res);
         }
@@ -603,9 +602,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     } else if (res != AMF_EOF && res == AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
-
-    //if (!frameSubmited)
-    //    return AVERROR(EAGAIN);
 
     return avpkt->size;
 }
