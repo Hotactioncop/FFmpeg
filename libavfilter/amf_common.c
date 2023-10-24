@@ -158,8 +158,7 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
         goto fail;
     }
 
-    surface_in->pVtbl->Release(surface_in);
-    surface_out->pVtbl->Release(surface_out);
+    //surface_in->pVtbl->Release(surface_in);
 
     if (inlink->sample_aspect_ratio.num) {
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
@@ -397,7 +396,6 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
         AVHWFramesContext *hwframes_out = (AVHWFramesContext *)ctx->hwframes_out_ref->data;
         if (hwframes_out->format == AV_PIX_FMT_AMF) {
             frame->data[3] = pSurface;
-            pSurface->pVtbl->Acquire(pSurface);
             frame->buf[1] = av_buffer_create((uint8_t *)pSurface, sizeof(AMFSurface),
                                             amf_free_amfsurface,
                                             (void*)avctx,
