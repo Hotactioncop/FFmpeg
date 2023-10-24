@@ -93,7 +93,7 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     res = ctx->scaler->pVtbl->SubmitInput(ctx->scaler, (AMFData*)surface_in);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
-
+    av_frame_unref(in);
     res = ctx->scaler->pVtbl->QueryOutput(ctx->scaler, &data_out);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "QueryOutput() failed with error %d\n", res);
 
@@ -379,9 +379,11 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
 
 void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
+    AVFilterContext *avctx = (AVFilterContext *)opaque;
     AMFSurface *surface = (AMFSurface*)(opaque);
     // FIXME: release surface properly
-    //surface->pVtbl->Release(surface);
+    int count = surface->pVtbl->Release(surface);
+    av_log(avctx, AV_LOG_ERROR, "Filter surface ref count = %d\n", count);
 }
 
 AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
@@ -394,11 +396,11 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
     if (ctx->hwframes_out_ref) {
         AVHWFramesContext *hwframes_out = (AVHWFramesContext *)ctx->hwframes_out_ref->data;
         if (hwframes_out->format == AV_PIX_FMT_AMF) {
-            frame->data[3] = (uint8_t *)pSurface;
-            frame->buf[0] = av_buffer_create(NULL,
-                                            0,
+            frame->data[3] = pSurface;
+            pSurface->pVtbl->Acquire(pSurface);
+            frame->buf[1] = av_buffer_create((uint8_t *)pSurface, sizeof(AMFSurface),
                                             amf_free_amfsurface,
-                                            pSurface,
+                                            (void*)avctx,
                                             AV_BUFFER_FLAG_READONLY);
         } else { // FIXME: add processing of other hw formats
             av_log(ctx, AV_LOG_ERROR, "Unknown pixel format\n");

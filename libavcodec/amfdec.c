@@ -87,7 +87,7 @@ static void amf_free_amfsurface(void *opaque, uint8_t *data)
     AMFSurface *surface = (AMFSurface*)(data);
     //FIXME: release shared surface properly
     int count = surface->pVtbl->Release(surface);
-    av_log(avctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
+    av_log(avctx, AV_LOG_ERROR, "Decoder surface ref count = %d\n", count);
     //surface->pVtbl->Release(surface);
 }
 
