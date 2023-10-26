@@ -93,7 +93,6 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     res = ctx->scaler->pVtbl->SubmitInput(ctx->scaler, (AMFData*)surface_in);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
-    av_frame_unref(in);
     res = ctx->scaler->pVtbl->QueryOutput(ctx->scaler, &data_out);
     AMF_GOTO_FAIL_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "QueryOutput() failed with error %d\n", res);
 
@@ -106,6 +105,8 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     out = amf_amfsurface_to_avframe(avctx, surface_out);
 
     ret = av_frame_copy_props(out, in);
+    av_frame_unref(in);
+
     out_colorspace = AVCOL_SPC_UNSPECIFIED;
 
     if (ctx->color_profile != AMF_VIDEO_CONVERTER_COLOR_PROFILE_UNKNOWN) {
@@ -159,6 +160,7 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
 
     //surface_in->pVtbl->Release(surface_in);
+    //surface_out->pVtbl->Release(surface_out);
 
     if (inlink->sample_aspect_ratio.num) {
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
@@ -308,7 +310,6 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
         hwframes_out = (AVHWFramesContext*)ctx->hwframes_out_ref->data;
         hwframes_out->format    = outlink->format;
         hwframes_out->sw_format = frames_ctx->sw_format;
-
     } else if (avctx->hw_device_ctx) {
         AVHWDeviceContext   *hwdev_ctx;
         err = av_hwdevice_ctx_create_derived(&ctx->amf_device_ref, AV_HWDEVICE_TYPE_AMF, avctx->hw_device_ctx, 0);
@@ -392,9 +393,16 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
 
     if (!frame)
         return NULL;
+
     if (ctx->hwframes_out_ref) {
         AVHWFramesContext *hwframes_out = (AVHWFramesContext *)ctx->hwframes_out_ref->data;
         if (hwframes_out->format == AV_PIX_FMT_AMF) {
+            int ret = av_hwframe_get_buffer(ctx->hwframes_out_ref, frame, 0);
+            if (ret < 0) {
+                av_log(avctx, AV_LOG_ERROR, "Get hw frame failed.\n");
+                av_frame_free(&frame);
+                return ret;
+            }
             frame->data[3] = pSurface;
             frame->buf[1] = av_buffer_create((uint8_t *)pSurface, sizeof(AMFSurface),
                                             amf_free_amfsurface,
@@ -405,6 +413,7 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
             return NULL;
         }
     } else {
+
         switch (pSurface->pVtbl->GetMemoryType(pSurface))
         {
     #if CONFIG_D3D11VA
