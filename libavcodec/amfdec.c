@@ -67,7 +67,7 @@ const enum AVPixelFormat amf_dec_pix_fmts[] = {
     AV_PIX_FMT_AMF,
     AV_PIX_FMT_NONE
 };
-
+ 
 static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
     &(const AVCodecHWConfigInternal) {
         .public = {
@@ -199,7 +199,6 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer = NULL;
         }
     }
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 16);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -599,7 +598,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         *got_frame = 1;
         frame->coded_picture_number = submitedCount - 1;
         dump_avframe_to_json(frame, "C:/msys64/home/user/ffmpeg-dumps/decoded", submitedCount - 1);
-    } else if (res != AMF_EOF && res == AMF_FAIL) {
+    } else if (res != AMF_EOF && res != AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
 
