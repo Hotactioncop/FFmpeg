@@ -199,6 +199,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer = NULL;
         }
     }
+    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 25);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
