@@ -87,7 +87,6 @@ static void amf_free_amfsurface(void *opaque, uint8_t *data)
     AMFSurface *surface = (AMFSurface*)(data);
     //FIXME: release shared surface properly
     int count = surface->pVtbl->Release(surface);
-    av_log(avctx, AV_LOG_ERROR, "Decoder surface ref count = %d\n", count);
     //surface->pVtbl->Release(surface);
 }
 
@@ -185,8 +184,20 @@ static int amf_init_decoder(AVCodecContext *avctx)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_DPB_SIZE, ctx->dpb_size);
     if (ctx->lowlatency != -1)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_LOW_LATENCY, ctx->lowlatency);
-    if (ctx->smart_access_video != -1)
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_ENABLE_SMART_ACCESS_VIDEO, ctx->smart_access_video);
+    if (ctx->smart_access_video != -1) {
+        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_ENABLE_SMART_ACCESS_VIDEO, ctx->smart_access_video != 0);
+        if (res != AMF_OK) {
+            av_log(avctx, AV_LOG_ERROR, "The Smart Access Video is not supported by AMF decoder.\n");
+            return AVERROR(EINVAL);
+        } else {
+            av_log(avctx, AV_LOG_INFO, "The Smart Access Video (%d) is set.\n", ctx->smart_access_video);
+            // Set low latency mode if Smart Access Video is enabled
+            if (ctx->smart_access_video != 0) {
+                AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_LOW_LATENCY, true);
+                av_log(avctx, AV_LOG_INFO, "The Smart Access Video set low latency mode for decoder.\n");
+            }
+        }
+    }
     if (ctx->skip_transfer_sav != -1)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SKIP_TRANSFER_SMART_ACCESS_VIDEO, ctx->skip_transfer_sav);
 
@@ -594,11 +605,9 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
 
     res = amf_receive_frame(avctx, frame);
     if (res == AMF_OK) {
-        av_log(avctx, AV_LOG_ERROR, "Submited decoder Count %d\n", submitedCount++);
         AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
         *got_frame = 1;
         frame->coded_picture_number = submitedCount - 1;
-        dump_avframe_to_json(frame, "C:/msys64/home/user/ffmpeg-dumps/decoded", submitedCount - 1);
     } else if (res != AMF_EOF && res != AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
