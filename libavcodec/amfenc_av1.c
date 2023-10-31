@@ -241,7 +241,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     pix_fmt = avctx->hw_frames_ctx ? ((AVHWFramesContext*)avctx->hw_frames_ctx->data)->sw_format
                                 : avctx->pix_fmt;
     color_depth = AMF_COLOR_BIT_DEPTH_8;
-    if (pix_fmt == AV_PIX_FMT_P010) {
+    if (pix_fmt == AV_PIX_FMT_P010 || pix_fmt == AV_PIX_FMT_YUV420P10) {
         color_depth = AMF_COLOR_BIT_DEPTH_10;
     }
 
