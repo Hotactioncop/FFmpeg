@@ -50,6 +50,9 @@ typedef struct AmfContext {
     AVClass            *avclass;
     // access to AMF runtime
     amf_handle          library; ///< handle to DLL library
+#ifdef _WIN32
+    amf_handle          winmm_lib; ///< handle to winmm DLL library
+#endif //_WIN32
     AMFFactory         *factory; ///< pointer to AMF factory
     AMFDebug           *debug;   ///< pointer to AMF debug interface
     AMFTrace           *trace;   ///< pointer to AMF trace interface

@@ -42,7 +42,12 @@
 #endif
 
 #ifdef _WIN32
+#include <timeapi.h>
 #include "compat/w32dlfcn.h"
+
+typedef MMRESULT (*timeapi_fun)(UINT uPeriod);
+#define WINMM_DLL "winmm.dll"
+
 #else
 #include <dlfcn.h>
 #endif
@@ -113,6 +118,9 @@ static int amf_load_library(AVCodecContext *avctx)
     AMFInit_Fn         init_fun;
     AMFQueryVersion_Fn version_fun;
     AMF_RESULT         res;
+#ifdef _WIN32
+    timeapi_fun time_begin_fun;
+#endif
 
     ctx->delayed_frame = av_frame_alloc();
     if (!ctx->delayed_frame) {
@@ -145,6 +153,16 @@ static int amf_load_library(AVCodecContext *avctx)
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetTrace() failed with error %d\n", res);
     res = ctx->factory->pVtbl->GetDebug(ctx->factory, &ctx->debug);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetDebug() failed with error %d\n", res);
+
+#ifdef _WIN32
+    // Increase precision of Sleep() function on Windows platform
+    ctx->winmm_lib = dlopen(WINMM_DLL, RTLD_NOW | RTLD_LOCAL);
+    AMF_RETURN_IF_FALSE(ctx, ctx->winmm_lib != NULL, 0, "DLL %s failed to open\n", WINMM_DLL);
+    time_begin_fun = (timeapi_fun)dlsym(ctx->winmm_lib, "timeBeginPeriod");
+    AMF_RETURN_IF_FALSE(ctx, time_begin_fun != NULL, 0, "DLL %s failed to find function %s\n", WINMM_DLL, "timeBeginPeriod");
+    time_begin_fun(1);
+#endif //_WIN32
+
     return 0;
 }
 
@@ -375,6 +393,9 @@ static int amf_init_encoder(AVCodecContext *avctx)
 int av_cold ff_amf_encode_close(AVCodecContext *avctx)
 {
     AmfContext *ctx = avctx->priv_data;
+#ifdef _WIN32
+    timeapi_fun time_end_fun;
+#endif //_WIN32
 
     if (ctx->delayed_surface) {
         ctx->delayed_surface->pVtbl->Release(ctx->delayed_surface);
@@ -409,6 +430,16 @@ int av_cold ff_amf_encode_close(AVCodecContext *avctx)
     ctx->delayed_drain = 0;
     av_frame_free(&ctx->delayed_frame);
     av_fifo_freep2(&ctx->timestamp_list);
+
+#ifdef _WIN32
+    if (ctx->winmm_lib) {
+        time_end_fun = (timeapi_fun)dlsym(ctx->winmm_lib, "timeEndPeriod");
+        AMF_RETURN_IF_FALSE(ctx, time_end_fun != NULL, 0, "DLL %s failed to find function %s\n", WINMM_DLL, "timeEndPeriod");
+        time_end_fun(1);
+        dlclose(ctx->winmm_lib);
+        ctx->winmm_lib = NULL;
+    }
+#endif //_WIN32
 
     return 0;
 }
