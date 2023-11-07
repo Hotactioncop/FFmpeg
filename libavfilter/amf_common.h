@@ -45,6 +45,8 @@ typedef struct AMFScaleContext {
     char *w_expr;
     char *h_expr;
     char *format_str;
+    int force_original_aspect_ratio;
+    int force_divisible_by;
 
     AMFComponent        *scaler;
     AVBufferRef         *amf_device_ref;
