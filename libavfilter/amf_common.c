@@ -279,6 +279,9 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
                                         &ctx->width, &ctx->height)) < 0)
         return err;
 
+    ff_scale_adjust_dimensions(inlink, &ctx->width, &ctx->height,
+                               ctx->force_original_aspect_ratio, ctx->force_divisible_by);
+
     av_buffer_unref(&ctx->amf_device_ref);
     av_buffer_unref(&ctx->hwframes_in_ref);
     av_buffer_unref(&ctx->hwframes_out_ref);
