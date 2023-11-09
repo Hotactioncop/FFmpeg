@@ -386,7 +386,6 @@ void amf_free_amfsurface(void *opaque, uint8_t *data)
     AMFSurface *surface = (AMFSurface*)(opaque);
     // FIXME: release surface properly
     int count = surface->pVtbl->Release(surface);
-    av_log(avctx, AV_LOG_ERROR, "Filter surface ref count = %d\n", count);
 }
 
 AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
