@@ -122,10 +122,12 @@ static int amf_scale_config_output(AVFilterLink *outlink)
 static const AVOption scale_amf_hq_options[] = {
     { "w",              "Output video width",   OFFSET(w_expr),     AV_OPT_TYPE_STRING, { .str = "iw"   }, .flags = FLAGS },
     { "h",              "Output video height",  OFFSET(h_expr),     AV_OPT_TYPE_STRING, { .str = "ih"   }, .flags = FLAGS },
+
     { "format",         "Output pixel format",  OFFSET(format_str), AV_OPT_TYPE_STRING, { .str = "same" }, .flags = FLAGS },
     { "sharpness",      "Sharpness",            OFFSET(sharpness),  AV_OPT_TYPE_FLOAT,  { .dbl = -1 }, -1, 2., FLAGS, "sharpness" },
     { "keep-ratio",     "Keep aspect ratio",    OFFSET(keep_ratio), AV_OPT_TYPE_BOOL, { .i64 = 0  },  0, 1, FLAGS, "keep_ration" },
     { "fill",           "Fill",                 OFFSET(fill),       AV_OPT_TYPE_BOOL, { .i64 = 0  },  0, 1, FLAGS, "fill" },
+
     { "algorithm",      "Scaling algorithm",    OFFSET(algorithm),      AV_OPT_TYPE_INT,   { .i64 = -1 }, -1, AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1, FLAGS, "algorithm" },
     { "bilinear",       "Bilinear",             0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_BILINEAR }, 0, 0, FLAGS, "algorithm" },
     { "bicubic",        "Bicubic",              0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_BICUBIC }, 0, 0, FLAGS, "algorithm" },
@@ -133,6 +135,11 @@ static const AVOption scale_amf_hq_options[] = {
     { "point",          "Point",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_POINT }, 0, 0, FLAGS, "algorithm" },
     { "sr1-1",          "Video SR1.1",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1 }, 0, 0, FLAGS, "algorithm" },
 
+    { "force_original_aspect_ratio", "decrease or increase w/h if necessary to keep the original AR", OFFSET(force_original_aspect_ratio), AV_OPT_TYPE_INT, { .i64 = 0}, 0, 2, FLAGS, "force_oar" },
+    { "disable",  NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 0 }, 0, 0, FLAGS, "force_oar" },
+    { "decrease", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1 }, 0, 0, FLAGS, "force_oar" },
+    { "increase", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 2 }, 0, 0, FLAGS, "force_oar" },
+    { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1}, 1, 256, FLAGS },
 
     { NULL },
 };
