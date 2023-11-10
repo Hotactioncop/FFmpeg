@@ -72,6 +72,9 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_AMF,
         AV_PIX_FMT_D3D11,
         AV_PIX_FMT_DXVA2_VLD,
+        AV_PIX_FMT_NV12,
+        AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NONE,
     };
     output_pix_fmts = output_pix_fmts_default;
