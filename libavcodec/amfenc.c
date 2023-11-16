@@ -160,11 +160,6 @@ int av_cold ff_amf_encode_close(AVCodecContext *avctx)
 {
     AmfContext *ctx = avctx->priv_data;
 
-    if (ctx->delayed_surface) {
-        ctx->delayed_surface->pVtbl->Release(ctx->delayed_surface);
-        ctx->delayed_surface = NULL;
-    }
-
     if (ctx->encoder) {
         ctx->encoder->pVtbl->Terminate(ctx->encoder);
         ctx->encoder->pVtbl->Release(ctx->encoder);
@@ -175,7 +170,6 @@ int av_cold ff_amf_encode_close(AVCodecContext *avctx)
     av_buffer_unref(&ctx->hw_frames_ctx);
     av_buffer_unref(&ctx->amf_device_ctx_internal);
 
-    av_frame_free(&ctx->delayed_frame);
     av_fifo_freep2(&ctx->timestamp_list);
 
     return 0;
@@ -312,10 +306,6 @@ int ff_amf_encode_init(AVCodecContext *avctx)
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
         hwdev_ctx = (AVHWDeviceContext*)frames_ctx->device_ctx;
     }
-    ctx->delayed_frame = av_frame_alloc();
-    if (!ctx->delayed_frame) {
-        return AVERROR(ENOMEM);
-    }
     if (amf_trace_writer.avctx == NULL)
         amf_trace_writer.avctx = avctx;
     // hardcoded to current HW queue size - will auto-realloc if too small
@@ -427,7 +417,7 @@ static void amf_release_buffer_with_frame_ref(AMFBuffer *frame_ref_storage_buffe
     av_frame_free(&frame_ref);
     frame_ref_storage_buffer->pVtbl->Release(frame_ref_storage_buffer);
 }
-static int submitedCount2 = 0;
+
 int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 {
     AmfContext *ctx = avctx->priv_data;
@@ -437,24 +427,20 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     int         ret;
     AMF_RESULT  res_query;
     AMFData    *data = NULL;
-    AVFrame    *frame = ctx->delayed_frame;
+    AVFrame    *frame = av_frame_alloc();
     int         block_and_wait;
     int         query_output_data_flag = 0;
-    AMF_RESULT  res_resubmit;
     int count = 0;
     if (!ctx->encoder)
         return AVERROR(EINVAL);
-    if (!frame->buf[0]) {
-        ret = ff_encode_get_frame(avctx, frame);
-        if (ret < 0 && ret != AVERROR_EOF)
-            return ret;
-    }
+
+    ret = ff_encode_get_frame(avctx, frame);
+    if (ret < 0 && ret != AVERROR_EOF)
+        return ret;
 
     if (!frame->buf[0]) { // submit drain
         if (!ctx->eof) { // submit drain one time only
-            if (ctx->delayed_surface != NULL) {
-                ctx->delayed_drain = 1; // input queue is full: resubmit Drain() in ff_amf_receive_packet
-            } else if(!ctx->delayed_drain) {
+            if(!ctx->delayed_drain) {
                 res = ctx->encoder->pVtbl->Drain(ctx->encoder);
                 if (res == AMF_INPUT_FULL) {
                     ctx->delayed_drain = 1; // input queue is full: resubmit Drain() in ff_amf_receive_packet
@@ -466,7 +452,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
                 }
             }
         }
-    } else if (!ctx->delayed_surface) { // submit frame
+    } else { // submit frame
         int hw_surface = 0;
 
         // prepare surface from frame
@@ -505,7 +491,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         case AV_PIX_FMT_AMF:
             {
                 surface = (AMFSurface*)frame->data[3];
-                //surface->pVtbl->SetCrop(surface, 0, 0, frame->width, frame->height);
+                surface->pVtbl->Acquire(surface);
                 hw_surface = 1;
             }
             break;
@@ -571,11 +557,10 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         // submit surface
         res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
         if (res == AMF_INPUT_FULL) { // handle full queue
-            //store surface for later submission
-            ctx->delayed_surface = surface;
+            av_usleep(1000); // wait and poll again
         } else {
             int64_t pts = frame->pts;
-            count = surface->pVtbl->Release(surface);
+            surface->pVtbl->Release(surface);
             //av_log(ctx, AV_LOG_ERROR, "Surface ref count = %d\n", count);
             AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
             av_frame_unref(frame);
@@ -610,36 +595,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 
             AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
 
-            if (ctx->delayed_surface != NULL) { // try to resubmit frame
-                if (ctx->delayed_surface->pVtbl->HasProperty(ctx->delayed_surface, L"av_frame_hdrmeta")) {
-                    AMFBuffer * hdrmeta_buffer = NULL;
-                    res = amf_get_property_buffer((AMFData *)ctx->delayed_surface, L"av_frame_hdrmeta", &hdrmeta_buffer);
-                    AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_hdrmeta\" with error %d\n", res);
-                    switch (avctx->codec->id) {
-                    case AV_CODEC_ID_H264:
-                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_INPUT_HDR_METADATA, hdrmeta_buffer); break;
-                    case AV_CODEC_ID_HEVC:
-                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_HEVC_INPUT_HDR_METADATA, hdrmeta_buffer); break;
-                    case AV_CODEC_ID_AV1:
-                        AMF_ASSIGN_PROPERTY_INTERFACE(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_INPUT_HDR_METADATA, hdrmeta_buffer); break;
-                    }
-                    hdrmeta_buffer->pVtbl->Release(hdrmeta_buffer);
-                }
-                res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)ctx->delayed_surface);
-                if (res != AMF_INPUT_FULL) {
-                    int64_t pts = ctx->delayed_surface->pVtbl->GetPts(ctx->delayed_surface);
-                    ctx->delayed_surface->pVtbl->Release(ctx->delayed_surface);
-                    ctx->delayed_surface = NULL;
-                    av_frame_unref(ctx->delayed_frame);
-                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated SubmitInput() failed with error %d\n", res);
-
-                    ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
-                    if (ret < 0)
-                        return ret;
-                } else {
-                    av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed frame submission got AMF_INPUT_FULL- should not happen\n");
-                }
-            } else if (ctx->delayed_drain) { // try to resubmit drain
+            if (ctx->delayed_drain) { // try to resubmit drain
                 res = ctx->encoder->pVtbl->Drain(ctx->encoder);
                 if (res != AMF_INPUT_FULL) {
                     ctx->delayed_drain = 0;
@@ -649,7 +605,7 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
                     av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed drain submission got AMF_INPUT_FULL- should not happen\n");
                 }
             }
-        } else if (ctx->delayed_surface != NULL || ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
+        } else if (ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
             block_and_wait = 1;
             av_usleep(1000); // wait and poll again
         }

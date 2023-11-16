@@ -83,54 +83,6 @@ AmfTraceWriter amf_trace_writer =
     .avctx = NULL
 };
 
-void dump_avframe_to_json(const AVFrame *frame, const char *dir, int frameNum) {
-    char filename[256];
-    sprintf(filename, "%s_%d.json", dir, frameNum);
-
-    FILE *file = fopen(filename, "w");
-    if (!file) {
-        fprintf(stderr, "Failed to open file for writing: %s\n", filename);
-        return;
-    }
-
-    fprintf(file, "{\n");
-
-    fprintf(file, "  \"width\": %d,\n", frame->width);
-    fprintf(file, "  \"height\": %d,\n", frame->height);
-    fprintf(file, "  \"nb_samples\": %d,\n", frame->nb_samples);
-    fprintf(file, "  \"format\": %d,\n", frame->format);//AVPixelFormat
-    fprintf(file, "  \"key_frame\": %s,\n", frame->key_frame?"true":"false");
-    fprintf(file, "  \"pict_type\": %d,\n", frame->pict_type);
-    fprintf(file, "  \"sample_aspect_ratio\": \"%d / %d\",\n", frame->sample_aspect_ratio.num, frame->sample_aspect_ratio.den);
-    fprintf(file, "  \"pts\": %" PRId64 ",\n", frame->pts);
-    fprintf(file, "  \"pkt_dts\": %" PRId64 ",\n", frame->pkt_dts);
-    fprintf(file, "  \"time_base\": \"%d / %d\",\n", frame->time_base.num, frame->time_base.den);
-    fprintf(file, "  \"quality\": %d,\n", frame->quality);
-    fprintf(file, "  \"repeat_pict\": %d,\n", frame->repeat_pict);
-    fprintf(file, "  \"sample_rate\": %d,\n", frame->sample_rate);
-    fprintf(file, "  \"flags\": %d,\n", frame->flags);
-    fprintf(file, "  \"color_range\": %d,\n", frame->color_range);
-    fprintf(file, "  \"color_primaries\": %d,\n", frame->color_primaries);
-    fprintf(file, "  \"color_trc\": %d,\n", frame->color_trc);
-    fprintf(file, "  \"colorspace\": %d,\n", frame->colorspace);
-    fprintf(file, "  \"chroma_location\": %d,\n", frame->chroma_location);
-    fprintf(file, "  \"best_effort_timestamp\": %" PRId64 ",\n", frame->best_effort_timestamp);
-    fprintf(file, "  \"number\": %d,\n", frame->coded_picture_number);
-
-    fprintf(file, "  \"pkt_pos\": %" PRId64 ",\n", frame->pkt_pos);
-    fprintf(file, "  \"pkt_duration\": %d,\n", frame->pkt_duration);
-
-    fprintf(file, "  \"decode_error_flags\": %d,\n", frame->decode_error_flags);
-    fprintf(file, "  \"pkt_size\": %d,\n", frame->pkt_size);
-    fprintf(file, "  \"crop\": \"{ %d %d %d %d }\",\n", frame->crop_top, frame->crop_bottom, frame->crop_left, frame->crop_right);
-    fprintf(file, "  \"duration\": %d\n", frame->duration);
-
-    // Закрывающая скобка для JSON объекта
-    fprintf(file, "}\n");
-
-    fclose(file);
-}
-
 const FormatMap format_map[] =
 {
     { AV_PIX_FMT_NONE,          AMF_SURFACE_UNKNOWN },
@@ -214,7 +166,7 @@ static int amf_frames_get_constraints(AVHWDeviceContext *ctx,
     return 0;
 }
 
-static void amf_buffer_free(void *opaque, uint8_t *data)
+static void amf_dummy_free(void *opaque, uint8_t *data)
 {
 
 }
@@ -224,9 +176,9 @@ static AVBufferRef *amf_pool_alloc(void *opaque, size_t size)
     AVHWFramesContext *hwfc = (AVHWFramesContext *)opaque;
     AVBufferRef *buf;
 
-    buf = av_buffer_create(NULL, sizeof(AMFSurface*), amf_buffer_free, hwfc, AV_BUFFER_FLAG_READONLY);
+    buf = av_buffer_create(NULL, NULL, amf_dummy_free, hwfc, AV_BUFFER_FLAG_READONLY);
     if (!buf) {
-        av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer for AMF surface.\n");
+        av_log(hwfc, AV_LOG_ERROR, "Failed to create buffer for AMF context.\n");
         return NULL;
     }
     return buf;
