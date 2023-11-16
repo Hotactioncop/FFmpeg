@@ -67,7 +67,7 @@ const enum AVPixelFormat amf_dec_pix_fmts[] = {
     AV_PIX_FMT_AMF,
     AV_PIX_FMT_NONE
 };
- 
+
 static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
     &(const AVCodecHWConfigInternal) {
         .public = {
@@ -80,7 +80,7 @@ static const AVCodecHWConfigInternal *const amf_hw_configs[] = {
     },
     NULL
 };
-
+static int frameCount = 0;
 static void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AVCodecContext *avctx = (AVCodecContext *)opaque;
@@ -297,31 +297,29 @@ static int amf_decode_init(AVCodecContext *avctx)
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
 
-        //if (avctx->hw_device_ctx && !avctx->hw_frames_ctx && ret == AV_PIX_FMT_AMF) {
-            AVHWFramesContext *hwframes_ctx;
-            avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
+        AVHWFramesContext *hwframes_ctx;
+        avctx->hw_frames_ctx = av_hwframe_ctx_alloc(avctx->hw_device_ctx);
 
-            if (!avctx->hw_frames_ctx) {
-                av_log(avctx, AV_LOG_ERROR, "av_hwframe_ctx_alloc failed\n");
-                return AVERROR(ENOMEM);
-            }
+        if (!avctx->hw_frames_ctx) {
+            av_log(avctx, AV_LOG_ERROR, "av_hwframe_ctx_alloc failed\n");
+            return AVERROR(ENOMEM);
+        }
 
-            hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-            hwframes_ctx->width             = FFALIGN(avctx->coded_width,  32);
-            hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
-            hwframes_ctx->format            = AV_PIX_FMT_AMF;
-            hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
-            hwframes_ctx->initial_pool_size = 8 + avctx->extra_hw_frames;
-            avctx->pix_fmt = AV_PIX_FMT_AMF;
+        hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+        hwframes_ctx->width             = FFALIGN(avctx->coded_width,  32);
+        hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
+        hwframes_ctx->format            = AV_PIX_FMT_AMF;
+        hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
+        hwframes_ctx->initial_pool_size = 8 + avctx->extra_hw_frames;
+        avctx->pix_fmt = AV_PIX_FMT_AMF;
 
-            ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
+        ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
 
-            if (ret < 0) {
-                av_log(NULL, AV_LOG_ERROR, "Error initializing a AMF frame pool\n");
-                av_buffer_unref(&avctx->hw_frames_ctx);
-                return ret;
-            }
-       // }
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Error initializing a AMF frame pool\n");
+            av_buffer_unref(&avctx->hw_frames_ctx);
+            return ret;
+        }
     }  else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
@@ -378,10 +376,11 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
                 av_log(avctx, AV_LOG_ERROR, "Get hw frame failed.\n");
                 return ret;
             }
+            //we need to release surface with frame to return it to decoder
             frame->buf[1] = av_buffer_create((uint8_t *)surface, sizeof(AMFSurface),
                                      amf_free_amfsurface, (void*)avctx,
                                      AV_BUFFER_FLAG_READONLY);
-            frame->data[3] = surface;
+            frame->data[3] = (uint8_t *)surface;
         } else {
             av_log(avctx, AV_LOG_ERROR, "Unknown format for hwframes_ctx\n");
             return AVERROR(ENOMEM);
@@ -398,12 +397,6 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
         }
         surface->pVtbl->Release(surface);
         surface = NULL;
-
-        // frame->buf[0] = av_buffer_create(NULL,
-        //                                  0,
-        //                                  amf_free_amfsurface,
-        //                                  0,
-        //                                  AV_BUFFER_FLAG_READONLY);
         frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
         av_frame_move_ref(frame, data);
         if (data) {
@@ -433,7 +426,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 #endif
 
     frame->color_range = avctx->color_range;
-    frame->flags = 0;
     frame->colorspace = avctx->colorspace;
     frame->color_trc = avctx->color_trc;
     frame->color_primaries = avctx->color_primaries;
@@ -495,11 +487,9 @@ static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 
     ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
     if (ret != AMF_OK && ret != AMF_REPEAT) {
-        av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned %d\n", ret);
         return ret;
     }
     if (data_out == NULL) {
-        av_log(avctx, AV_LOG_VERBOSE, "QueryOutput() returned empty data\n");
         return AMF_FAIL;
     }
 
@@ -568,7 +558,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
 
     return amf_update_buffer_properties(avctx, buf, pkt);
 }
-static int submitedCount = 0;
+
 static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
                        int *got_frame, AVPacket *avpkt)
 {
@@ -576,6 +566,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     AVFrame             *frame = data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
+    int frameSubmited = 0;
 
     if (!ctx->decoder)
         return AVERROR(EINVAL);
@@ -591,6 +582,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         // FIXME: check other return values
         if (res == AMF_OK || res == AMF_NEED_MORE_INPUT)
         {
+            frameSubmited = 1;
             *got_frame = 0;
         } else {
             av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d\n", res);
@@ -607,7 +599,6 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
     if (res == AMF_OK) {
         AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
         *got_frame = 1;
-        frame->coded_picture_number = submitedCount - 1;
     } else if (res != AMF_EOF && res != AMF_FAIL) {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
