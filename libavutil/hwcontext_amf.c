@@ -76,7 +76,7 @@ static AMFTraceWriterVtbl tracer_vtbl =
     .Flush = AMFTraceWriter_Flush,
 };
 
-AmfTraceWriter amf_trace_writer =
+AmfTraceWriter av_amf_trace_writer =
 {
     .vtbl = &tracer_vtbl,
     .avcl = &amflib_context,
@@ -104,7 +104,7 @@ const FormatMap format_map[] =
     { AV_PIX_FMT_YUV444P10LE,   AMF_SURFACE_Y416 },
 };
 
-enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
+enum AMF_SURFACE_FORMAT av_amf_av_to_amf_format(enum AVPixelFormat fmt)
 {
     int i;
     for (i = 0; i < amf_countof(format_map); i++) {
@@ -115,7 +115,7 @@ enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt)
     return AMF_SURFACE_UNKNOWN;
 }
 
-enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt)
+enum AVPixelFormat av_amf_to_av_format(enum AMF_SURFACE_FORMAT fmt)
 {
     int i;
     for (i = 0; i < amf_countof(format_map); i++) {
@@ -301,7 +301,7 @@ static void amf_device_uninit(AVHWDeviceContext *device_ctx)
 static int amf_device_init(AVHWDeviceContext *ctx)
 {
     AVAMFDeviceContext *amf_ctx = ctx->hwctx;
-    return amf_context_init((AVAMFDeviceContextInternal * )amf_ctx->internal->data, ctx);
+    return av_amf_context_init((AVAMFDeviceContextInternal * )amf_ctx->internal->data, ctx);
 }
 
 static int amf_device_create(AVHWDeviceContext *device_ctx,
@@ -311,11 +311,11 @@ static int amf_device_create(AVHWDeviceContext *device_ctx,
     AVAMFDeviceContext        *ctx = device_ctx->hwctx;
     AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
     ctx->internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
-                                                    amf_context_internal_free, NULL, 0);
+                                                    av_amf_context_internal_free, NULL, 0);
     AVAMFDeviceContextInternal * internal = (AVAMFDeviceContextInternal * )ctx->internal->data;
     int ret;
-    if ((ret = amf_load_library(internal, device_ctx)) == 0) {
-        if ((ret = amf_create_context(internal, device_ctx, "", opts, flags)) == 0){
+    if ((ret = av_amf_load_library(internal, device_ctx)) == 0) {
+        if ((ret = av_amf_create_context(internal, device_ctx, "", opts, flags)) == 0){
             return 0;
         }
     }
@@ -335,7 +335,7 @@ static int amf_device_derive(AVHWDeviceContext *device_ctx,
     if(ret < 0)
         return ret;
 
-    return amf_context_derive(internal, child_device_ctx, opts, flags);
+    return av_amf_context_derive(internal, child_device_ctx, opts, flags);
 }
 
 #if CONFIG_DXVA2
@@ -401,7 +401,7 @@ static int amf_init_from_d3d11_device(AVAMFDeviceContextInternal* internal, AVD3
 }
 #endif
 
-int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
+int av_amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
 {
      AMFContext1 *context1 = NULL;
      AMF_RESULT res;
@@ -435,7 +435,7 @@ int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl)
      }
      return 0;
 }
-int amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl)
+int av_amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl)
 {
     AMFInit_Fn         init_fun;
     AMFQueryVersion_Fn version_fun;
@@ -462,7 +462,7 @@ int amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl)
     return 0;
 }
 
-int amf_create_context(  AVAMFDeviceContextInternal * internal,
+int av_amf_create_context(  AVAMFDeviceContextInternal * internal,
                                 void* avcl,
                                 const char *device,
                                 AVDictionary *opts, int flags)
@@ -473,8 +473,8 @@ int amf_create_context(  AVAMFDeviceContextInternal * internal,
     internal->trace->pVtbl->SetGlobalLevel(internal->trace, AMF_TRACE_TRACE);
 
      // connect AMF logger to av_log
-    amf_trace_writer.avctx = avcl;
-    internal->trace->pVtbl->RegisterWriter(internal->trace, FFMPEG_AMF_WRITER_ID, (AMFTraceWriter*)&amf_trace_writer, 1);
+    av_amf_trace_writer.avctx = avcl;
+    internal->trace->pVtbl->RegisterWriter(internal->trace, FFMPEG_AMF_WRITER_ID, (AMFTraceWriter*)&av_amf_trace_writer, 1);
     internal->trace->pVtbl->SetWriterLevel(internal->trace, FFMPEG_AMF_WRITER_ID, AMF_TRACE_TRACE);
 
     res = internal->factory->pVtbl->CreateContext(internal->factory, &internal->context);
@@ -483,22 +483,22 @@ int amf_create_context(  AVAMFDeviceContextInternal * internal,
     return 0;
 }
 
-int amf_context_internal_create(AVAMFDeviceContextInternal * internal,
+int av_amf_context_internal_create(AVAMFDeviceContextInternal * internal,
                                 void* avcl,
                                 const char *device,
                                 AVDictionary *opts, int flags)
 {
     int ret;
-    if ((ret = amf_load_library(internal, avcl)) == 0) {
-        if ((ret = amf_create_context(internal, avcl, "", opts, flags)) == 0){
+    if ((ret = av_amf_load_library(internal, avcl)) == 0) {
+        if ((ret = av_amf_create_context(internal, avcl, "", opts, flags)) == 0){
             return 0;
         }
     }
-    amf_context_internal_free(0, (uint8_t *)internal);
+    av_amf_context_internal_free(0, (uint8_t *)internal);
     return ret;
 }
 
-int amf_context_internal_free(void *opaque, uint8_t *data)
+int av_amf_context_internal_free(void *opaque, uint8_t *data)
 {
     AVAMFDeviceContextInternal *amf_ctx = (AVAMFDeviceContextInternal *)data;
     if (amf_ctx->context) {
@@ -522,7 +522,7 @@ int amf_context_internal_free(void *opaque, uint8_t *data)
     return 0;
 }
 
-int amf_context_derive(AVAMFDeviceContextInternal * internal,
+int av_amf_context_derive(AVAMFDeviceContextInternal * internal,
                                AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
                                int flags)
 {

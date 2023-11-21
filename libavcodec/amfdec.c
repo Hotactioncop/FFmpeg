@@ -101,9 +101,9 @@ static int amf_init_decoder(AVCodecContext *avctx)
     amf_int64               color_profile;
 
     if (avctx->pix_fmt == AV_PIX_FMT_AMF)
-        output_format = amf_av_to_amf_format(avctx->sw_pix_fmt);
+        output_format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
     else
-        output_format = amf_av_to_amf_format(avctx->pix_fmt);
+        output_format = av_amf_av_to_amf_format(avctx->pix_fmt);
 
     if (output_format == AMF_SURFACE_UNKNOWN)
         output_format = AMF_SURFACE_NV12;
@@ -223,7 +223,7 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
 
     if (avctx->hw_frames_ctx) {
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
+        ret = av_amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
         if (ret < 0)
             return ret;
         ctx->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
@@ -232,14 +232,14 @@ static int amf_init_decoder_context(AVCodecContext *avctx)
     }
     else if (avctx->hw_device_ctx) {
         AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
+        ret = av_amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
         if (ret < 0)
             return ret;
         ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
         if (!ctx->hw_device_ctx)
             return AVERROR(ENOMEM);
     } else {
-        ret = amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
+        ret = av_amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
         if (ret != 0) {
             return ret;
         }
@@ -323,8 +323,8 @@ static int amf_decode_init(AVCodecContext *avctx)
     }  else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
-                                                amf_context_internal_free, NULL, 0);
-        if ((ret = amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+                                                av_amf_context_internal_free, NULL, 0);
+        if ((ret = av_amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
             amf_decode_close(avctx);
             return ret;
         }
@@ -397,7 +397,7 @@ static int amf_amfsurface_to_avframe(AVCodecContext *avctx, AMFSurface* surface,
         }
         surface->pVtbl->Release(surface);
         surface = NULL;
-        frame->format = amf_to_av_format(surface->pVtbl->GetFormat(surface));
+        frame->format = av_amf_to_av_format(surface->pVtbl->GetFormat(surface));
         av_frame_move_ref(frame, data);
         if (data) {
             av_frame_free(&data);

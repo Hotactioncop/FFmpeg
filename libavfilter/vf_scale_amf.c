@@ -105,7 +105,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFVideoConverter, &ctx->scaler);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFVideoConverter, res);
     // FIXME: add checks whether we have HW context
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->scaler, AMF_VIDEO_CONVERTER_OUTPUT_FORMAT, (amf_int32)amf_av_to_amf_format(hwframes_out->sw_format));
+    AMF_ASSIGN_PROPERTY_INT64(res, ctx->scaler, AMF_VIDEO_CONVERTER_OUTPUT_FORMAT, (amf_int32)av_amf_av_to_amf_format(hwframes_out->sw_format));
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFConverter-SetProperty() failed with error %d\n", res);
 
     out_size.width = outlink->w;
@@ -161,7 +161,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->scaler, AMF_VIDEO_CONVERTER_OUTPUT_TRANSFER_CHARACTERISTIC, ctx->trc);
     }
 
-    res = ctx->scaler->pVtbl->Init(ctx->scaler, amf_av_to_amf_format(in_format), inlink->w, inlink->h);
+    res = ctx->scaler->pVtbl->Init(ctx->scaler, av_amf_av_to_amf_format(in_format), inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFConverter-Init() failed with error %d\n", res);
 
     return 0;

@@ -83,22 +83,22 @@ typedef struct FormatMap {
 } FormatMap;
 
 extern const FormatMap format_map[];
-enum AMF_SURFACE_FORMAT amf_av_to_amf_format(enum AVPixelFormat fmt);
-enum AVPixelFormat amf_to_av_format(enum AMF_SURFACE_FORMAT fmt);
-extern AmfTraceWriter amf_trace_writer;
+enum AMF_SURFACE_FORMAT av_amf_av_to_amf_format(enum AVPixelFormat fmt);
+enum AVPixelFormat av_amf_to_av_format(enum AMF_SURFACE_FORMAT fmt);
+extern AmfTraceWriter av_amf_trace_writer;
 
-int amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl);
-int amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl);
-int amf_create_context(  AVAMFDeviceContextInternal * internal,
+int av_amf_context_init(AVAMFDeviceContextInternal* internal, void* avcl);
+int av_amf_load_library(AVAMFDeviceContextInternal* internal,  void* avcl);
+int av_amf_create_context(  AVAMFDeviceContextInternal * internal,
                                 void* avcl,
                                 const char *device,
                                 AVDictionary *opts, int flags);
-int amf_context_internal_create(AVAMFDeviceContextInternal * internal,
+int av_amf_context_internal_create(AVAMFDeviceContextInternal * internal,
                                 void* avcl,
                                 const char *device,
                                 AVDictionary *opts, int flags);
-int amf_context_internal_free(void *opaque, uint8_t *data);
-int amf_context_derive(AVAMFDeviceContextInternal * internal,
+int av_amf_context_internal_free(void *opaque, uint8_t *data);
+int av_amf_context_derive(AVAMFDeviceContextInternal * internal,
                               AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
                               int flags);
 

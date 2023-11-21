@@ -292,7 +292,7 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
             AVAMFDeviceContext * amf_ctx =  frames_ctx->device_ctx->hwctx;
             ctx->amf_device_ctx_internal = av_buffer_ref(amf_ctx->internal);
         }
-        if (amf_av_to_amf_format(frames_ctx->sw_format) == AMF_SURFACE_UNKNOWN) {
+        if (av_amf_av_to_amf_format(frames_ctx->sw_format) == AMF_SURFACE_UNKNOWN) {
             av_log(avctx, AV_LOG_ERROR, "Format of input frames context (%s) is not supported by AMF.\n",
                    av_get_pix_fmt_name(frames_ctx->sw_format));
             return AVERROR(EINVAL);
@@ -338,8 +338,8 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
     } else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
-                                                amf_context_internal_free, NULL, 0);
-        if ((res == amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+                                                av_amf_context_internal_free, NULL, 0);
+        if ((res == av_amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
             return res;
         }
         ctx->hwframes_out_ref = av_hwframe_ctx_alloc(ctx->amf_device_ref);
@@ -503,7 +503,7 @@ int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *frame, AMFS
 #endif
     default:
         {
-            AMF_SURFACE_FORMAT amf_fmt = amf_av_to_amf_format(frame->format);
+            AMF_SURFACE_FORMAT amf_fmt = av_amf_av_to_amf_format(frame->format);
             res = internal->context->pVtbl->AllocSurface(internal->context, AMF_MEMORY_HOST, amf_fmt, frame->width, frame->height, &surface);
             AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
             amf_copy_surface(avctx, frame, surface);
