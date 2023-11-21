@@ -111,7 +111,7 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     ctx->primaries = AMF_COLOR_PRIMARIES_UNDEFINED;
     ctx->trc = AMF_COLOR_TRANSFER_CHARACTERISTIC_UNDEFINED;
 
-    res = ctx->scaler->pVtbl->Init(ctx->scaler, amf_av_to_amf_format(in_format), inlink->w, inlink->h);
+    res = ctx->scaler->pVtbl->Init(ctx->scaler, av_amf_av_to_amf_format(in_format), inlink->w, inlink->h);
     AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFHQScaler-Init() failed with error %d\n", res);
 
     return 0;

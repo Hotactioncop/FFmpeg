@@ -144,9 +144,9 @@ static int amf_init_encoder(AVCodecContext *avctx)
         pix_fmt = avctx->pix_fmt;
 
     if (avctx->pix_fmt != AV_PIX_FMT_AMF)
-        ctx->format = amf_av_to_amf_format(pix_fmt);
+        ctx->format = av_amf_av_to_amf_format(pix_fmt);
     else
-        ctx->format = amf_av_to_amf_format(avctx->sw_pix_fmt);
+        ctx->format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
 
     AMF_RETURN_IF_FALSE(ctx, ctx->format != AMF_SURFACE_UNKNOWN, AVERROR(EINVAL),
                     "Format %s is not supported\n", av_get_pix_fmt_name(pix_fmt));
@@ -183,7 +183,7 @@ static int amf_init_encoder_context(AVCodecContext *avctx)
 
     if (avctx->hw_frames_ctx) {
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
-        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
+        ret = av_amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, frames_ctx->device_ctx, NULL, 0);
         if (ret < 0)
             return ret;
         ctx->hw_frames_ctx = av_buffer_ref(avctx->hw_frames_ctx);
@@ -192,7 +192,7 @@ static int amf_init_encoder_context(AVCodecContext *avctx)
     }
     else if (avctx->hw_device_ctx) {
         AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)avctx->hw_device_ctx->data;
-        ret = amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
+        ret = av_amf_context_derive((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, device_ctx, NULL, 0);
         if (ret < 0)
             return ret;
         ctx->hw_device_ctx = av_buffer_ref(avctx->hw_device_ctx);
@@ -200,7 +200,7 @@ static int amf_init_encoder_context(AVCodecContext *avctx)
             return AVERROR(ENOMEM);
 
     } else {
-        ret = amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
+        ret = av_amf_context_init((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx);
         if (ret != 0) {
             return ret;
         }
@@ -306,8 +306,8 @@ int ff_amf_encode_init(AVCodecContext *avctx)
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
         hwdev_ctx = (AVHWDeviceContext*)frames_ctx->device_ctx;
     }
-    if (amf_trace_writer.avctx == NULL)
-        amf_trace_writer.avctx = avctx;
+    if (av_amf_trace_writer.avctx == NULL)
+        av_amf_trace_writer.avctx = avctx;
     // hardcoded to current HW queue size - will auto-realloc if too small
     ctx->timestamp_list = av_fifo_alloc2(avctx->max_b_frames + 16, sizeof(int64_t),
                                          AV_FIFO_FLAG_AUTO_GROW);
@@ -330,8 +330,8 @@ int ff_amf_encode_init(AVCodecContext *avctx)
     } else {
         AVAMFDeviceContextInternal *wrapped = av_mallocz(sizeof(*wrapped));
         ctx->amf_device_ctx_internal = av_buffer_create((uint8_t *)wrapped, sizeof(*wrapped),
-                                                amf_context_internal_free, NULL, 0);
-        if ((ret = amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
+                                                av_amf_context_internal_free, NULL, 0);
+        if ((ret = av_amf_context_internal_create((AVAMFDeviceContextInternal *)ctx->amf_device_ctx_internal->data, avctx, "", NULL, 0)) != 0) {
             ff_amf_encode_close(avctx);
             return ret;
         }
