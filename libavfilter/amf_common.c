@@ -383,9 +383,8 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
 void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
     AVFilterContext *avctx = (AVFilterContext *)opaque;
-    AMFSurface *surface = (AMFSurface*)(opaque);
-    // FIXME: release surface properly
-    int count = surface->pVtbl->Release(surface);
+    AMFSurface *surface = (AMFSurface*)(data);
+    surface->pVtbl->Release(surface);
 }
 
 AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
