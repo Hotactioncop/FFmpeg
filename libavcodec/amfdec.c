@@ -99,6 +99,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMF_RESULT              res;
     AMFBuffer               *buffer;
     amf_int64               color_profile;
+    int                     pool_size = 17;
 
     if (avctx->pix_fmt == AV_PIX_FMT_AMF)
         output_format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
@@ -178,8 +179,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_TIMESTAMP_MODE, ctx->timestamp_mode);
     if (ctx->decoder_mode != -1)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_REORDER_MODE, ctx->decoder_mode);
-    if (ctx->surface_pool_size != -1)
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, ctx->surface_pool_size);
+
     if (ctx->dpb_size != -1)
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_DPB_SIZE, ctx->dpb_size);
     if (ctx->lowlatency != -1)
@@ -210,7 +210,14 @@ static int amf_init_decoder(AVCodecContext *avctx)
             buffer = NULL;
         }
     }
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, 25);
+    if (ctx->surface_pool_size == -1) {
+        ctx->surface_pool_size = pool_size;
+        if (avctx->extra_hw_frames > 0)
+            ctx->surface_pool_size += avctx->extra_hw_frames;
+        if (avctx->active_thread_type & FF_THREAD_FRAME)
+            ctx->surface_pool_size += avctx->thread_count;
+    }
+    AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_POOL_SIZE, ctx->surface_pool_size);
     res = ctx->decoder->pVtbl->Init(ctx->decoder, output_format, avctx->width, avctx->height);
     return 0;
 }
@@ -310,7 +317,7 @@ static int amf_decode_init(AVCodecContext *avctx)
         hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
         hwframes_ctx->format            = AV_PIX_FMT_AMF;
         hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
-        hwframes_ctx->initial_pool_size = 8 + avctx->extra_hw_frames;
+        hwframes_ctx->initial_pool_size = ctx->surface_pool_size;
         avctx->pix_fmt = AV_PIX_FMT_AMF;
 
         ret = av_hwframe_ctx_init(avctx->hw_frames_ctx);
