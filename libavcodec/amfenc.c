@@ -418,6 +418,33 @@ static void amf_release_buffer_with_frame_ref(AMFBuffer *frame_ref_storage_buffe
     frame_ref_storage_buffer->pVtbl->Release(frame_ref_storage_buffer);
 }
 
+static int fill_packet(AVCodecContext *avctx, AMFData *data, AVPacket *avpkt)
+{
+    AmfContext *ctx = avctx->priv_data;
+    AMFBuffer* buffer = NULL;
+    AMF_RESULT  res;
+    int         ret;
+    // copy data to packet
+    AMFGuid guid = IID_AMFBuffer();
+    data->pVtbl->QueryInterface(data, &guid, (void **)&buffer); // query for buffer interface
+    ret = amf_copy_buffer(avctx, avpkt, buffer);
+
+    buffer->pVtbl->Release(buffer);
+
+    if (data->pVtbl->HasProperty(data, L"av_frame_ref")) {
+        AMFBuffer *frame_ref_storage_buffer;
+        res = amf_get_property_buffer(data, L"av_frame_ref", &frame_ref_storage_buffer);
+        AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_ref\" with error %d\n", res);
+        amf_release_buffer_with_frame_ref(frame_ref_storage_buffer);
+        ctx->hwsurfaces_in_queue--;
+    }
+    data->pVtbl->Release(data);
+
+    AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
+
+    return ret;
+}
+
 int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 {
     AmfContext *ctx = avctx->priv_data;
@@ -433,6 +460,11 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     int count = 0;
     if (!ctx->encoder)
         return AVERROR(EINVAL);
+    res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
+    if (data) {
+        ret = fill_packet(avctx, data, avpkt);
+        goto end;
+    }
 
     ret = ff_encode_get_frame(avctx, frame);
     if (ret < 0 && ret != AVERROR_EOF)
@@ -440,16 +472,19 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
 
     if (!frame->buf[0]) { // submit drain
         if (!ctx->eof) { // submit drain one time only
-            if(!ctx->delayed_drain) {
-                res = ctx->encoder->pVtbl->Drain(ctx->encoder);
-                if (res == AMF_INPUT_FULL) {
-                    ctx->delayed_drain = 1; // input queue is full: resubmit Drain() in ff_amf_receive_packet
-                } else {
-                    if (res == AMF_OK) {
-                        ctx->eof = 1; // drain started
+            res = ctx->encoder->pVtbl->Drain(ctx->encoder);
+            if (res == AMF_INPUT_FULL) {
+                do {
+                    res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
+                    if (data) {
+                        ret = fill_packet(avctx, data, avpkt);
+                        goto end;
                     }
-                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Drain() failed with error %d\n", res);
-                }
+                } while (data == NULL);
+            } else if (res == AMF_OK) {
+                ctx->eof = 1; // drain started
+            } else {
+                AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Drain() failed with error %d\n", res);
             }
         }
     } else { // submit frame
@@ -557,7 +592,15 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         // submit surface
         res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
         if (res == AMF_INPUT_FULL) { // handle full queue
-            av_usleep(1000); // wait and poll again
+            //av_usleep(1000); // wait and poll again
+            do {
+                res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
+                if (data) {
+                    ret = fill_packet(avctx, data, avpkt);
+                    goto end;
+                }
+            } while (data == NULL);
+            res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
         } else {
             int64_t pts = frame->pts;
             surface->pVtbl->Release(surface);
@@ -569,50 +612,10 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         }
     }
 
-
-    do {
-        block_and_wait = 0;
-        // poll data
-        res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
-        if (data) {
-            // copy data to packet
-            AMFBuffer* buffer;
-            AMFGuid guid = IID_AMFBuffer();
-            data->pVtbl->QueryInterface(data, &guid, (void**)&buffer); // query for buffer interface
-            ret = amf_copy_buffer(avctx, avpkt, buffer);
-
-            buffer->pVtbl->Release(buffer);
-
-            if (data->pVtbl->HasProperty(data, L"av_frame_ref")) {
-                AMFBuffer *frame_ref_storage_buffer;
-                res = amf_get_property_buffer(data, L"av_frame_ref", &frame_ref_storage_buffer);
-                AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "GetProperty failed for \"av_frame_ref\" with error %d\n", res);
-                amf_release_buffer_with_frame_ref(frame_ref_storage_buffer);
-                ctx->hwsurfaces_in_queue--;
-            }
-            data->pVtbl->Release(data);
-
-            AMF_RETURN_IF_FALSE(ctx, ret >= 0, ret, "amf_copy_buffer() failed with error %d\n", ret);
-
-            if (ctx->delayed_drain) { // try to resubmit drain
-                res = ctx->encoder->pVtbl->Drain(ctx->encoder);
-                if (res != AMF_INPUT_FULL) {
-                    ctx->delayed_drain = 0;
-                    ctx->eof = 1; // drain started
-                    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "Repeated Drain() failed with error %d\n", res);
-                } else {
-                    av_log(avctx, AV_LOG_WARNING, "Data acquired but delayed drain submission got AMF_INPUT_FULL- should not happen\n");
-                }
-            }
-        } else if (ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max)) {
-            block_and_wait = 1;
-            av_usleep(1000); // wait and poll again
-        }
-    } while (block_and_wait);
-
+end:
     if (res_query == AMF_EOF) {
         ret = AVERROR_EOF;
-    } else if (data == NULL) {
+    } else if (data == NULL && ctx->eof != 1) {
         ret = AVERROR(EAGAIN);
     } else {
         ret = 0;
