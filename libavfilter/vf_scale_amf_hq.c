@@ -35,7 +35,7 @@
 
 #include "AMF/components/HQScaler.h"
 #include "AMF/components/ColorSpace.h"
-#include "amf_common.h"
+#include "vf_scale_amf_common.h"
 
 #include "avfilter.h"
 #include "internal.h"

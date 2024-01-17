@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "amf_common.h"
+#include "vf_scale_amf_common.h"
 
 #include "libavutil/avassert.h"
 #include "avfilter.h"

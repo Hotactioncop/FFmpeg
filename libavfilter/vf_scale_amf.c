@@ -34,7 +34,7 @@
 #include "libavutil/hwcontext_amf.h"
 
 #include "AMF/components/VideoConverter.h"
-#include "amf_common.h"
+#include "vf_scale_amf_common.h"
 
 #include "avfilter.h"
 #include "formats.h"
