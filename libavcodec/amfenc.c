@@ -457,7 +457,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     AVFrame    *frame = av_frame_alloc();
     int         block_and_wait;
     int         query_output_data_flag = 0;
-    int count = 0;
+    int64_t     pts = 0;
+    int         count = 0;
     if (!ctx->encoder)
         return AVERROR(EINVAL);
     res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
@@ -480,6 +481,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
                         ret = fill_packet(avctx, data, avpkt);
                         goto end;
                     }
+                    av_log(avctx, AV_LOG_ERROR, "Retry QueryOutput() %d\n");
+                    //av_usleep(500);
                 } while (data == NULL);
             } else if (res == AMF_OK) {
                 ctx->eof = 1; // drain started
@@ -592,23 +595,34 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
         // submit surface
         res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
         if (res == AMF_INPUT_FULL) { // handle full queue
-            //av_usleep(1000); // wait and poll again
             do {
                 res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
                 if (data) {
                     ret = fill_packet(avctx, data, avpkt);
-                    goto end;
                 }
+                //av_usleep(500);
             } while (data == NULL);
             res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
-        } else {
-            int64_t pts = frame->pts;
+            pts = frame->pts;
             surface->pVtbl->Release(surface);
             AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
             av_frame_unref(frame);
             ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
             if (ret < 0)
                 return ret;
+        } else {
+            pts = frame->pts;
+            surface->pVtbl->Release(surface);
+            AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_UNKNOWN, "SubmitInput() failed with error %d\n", res);
+            av_frame_unref(frame);
+            ret = av_fifo_write(ctx->timestamp_list, &pts, 1);
+            if (ret < 0)
+                return ret;
+            res_query = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
+            if (data) {
+                ret = fill_packet(avctx, data, avpkt);
+                goto end;
+            }
         }
     }
 

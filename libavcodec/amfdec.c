@@ -99,7 +99,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
     AMF_RESULT              res;
     AMFBuffer               *buffer;
     amf_int64               color_profile;
-    int                     pool_size = 17;
+    int                     pool_size = 30;
 
     if (avctx->pix_fmt == AV_PIX_FMT_AMF)
         output_format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
@@ -491,9 +491,8 @@ static AMF_RESULT amf_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     AMFSurface          *surface = NULL;
     AMFData             *data_out = NULL;
     AMFVariantStruct    var = {0};
-
     ret = ctx->decoder->pVtbl->QueryOutput(ctx->decoder, &data_out);
-    if (ret != AMF_OK && ret != AMF_REPEAT) {
+    if (ret != AMF_OK) {
         return ret;
     }
     if (data_out == NULL) {
@@ -591,6 +590,11 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         {
             frameSubmited = 1;
             *got_frame = 0;
+        } else if (res == AMF_DECODER_NO_FREE_SURFACES) {
+            *got_frame = 0;
+            av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d: pool is full\n", res);
+            av_usleep(1000);
+            return avpkt->size;
         } else {
             av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned %d\n", res);
         }
@@ -607,6 +611,7 @@ static int amf_decode_frame(AVCodecContext *avctx, AVFrame *data,
         AMF_RETURN_IF_FALSE(avctx, !*got_frame, avpkt->size, "frame already got");
         *got_frame = 1;
     } else if (res != AMF_EOF && res != AMF_FAIL) {
+        *got_frame = 0;
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
 
