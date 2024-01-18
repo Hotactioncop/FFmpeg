@@ -159,9 +159,6 @@ int amf_scale_filter_frame(AVFilterLink *inlink, AVFrame *in)
         goto fail;
     }
 
-    //surface_in->pVtbl->Release(surface_in);
-    //surface_out->pVtbl->Release(surface_out);
-
     if (inlink->sample_aspect_ratio.num) {
         outlink->sample_aspect_ratio = av_mul_q((AVRational){outlink->h * inlink->w, outlink->w * inlink->h}, inlink->sample_aspect_ratio);
     } else
@@ -382,8 +379,7 @@ int amf_init_scale_config(AVFilterLink *outlink, enum AVPixelFormat *in_format)
 
 void amf_free_amfsurface(void *opaque, uint8_t *data)
 {
-    AVFilterContext *avctx = (AVFilterContext *)opaque;
-    AMFSurface *surface = (AMFSurface*)(data);
+    AMFSurface *surface = (AMFSurface*)data;
     surface->pVtbl->Release(surface);
 }
 
@@ -402,9 +398,9 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
             if (ret < 0) {
                 av_log(avctx, AV_LOG_ERROR, "Get hw frame failed.\n");
                 av_frame_free(&frame);
-                return ret;
+                return NULL;
             }
-            frame->data[3] = pSurface;
+            frame->data[3] = (uint8_t *)pSurface;
             frame->buf[1] = av_buffer_create((uint8_t *)pSurface, sizeof(AMFSurface),
                                             amf_free_amfsurface,
                                             (void*)avctx,
@@ -447,7 +443,6 @@ AVFrame *amf_amfsurface_to_avframe(AVFilterContext *avctx, AMFSurface* pSurface)
             break;
     #endif
         default:
-            // FIXME: add support for other memory types
             {
                 av_log(avctx, AV_LOG_ERROR, "Unsupported memory type : %d\n", pSurface->pVtbl->GetMemoryType(pSurface));
                 return NULL;
@@ -481,7 +476,6 @@ int amf_avframe_to_amfsurface(AVFilterContext *avctx, const AVFrame *frame, AMFS
         }
         break;
 #endif
-    // FIXME: need to use hw_frames_ctx to get texture
     case AV_PIX_FMT_AMF:
         {
             surface = (AMFSurface*)frame->data[3]; // actual surface

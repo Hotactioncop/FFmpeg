@@ -97,7 +97,7 @@ int av_amf_context_internal_create(AVAMFDeviceContextInternal * internal,
                                 void* avcl,
                                 const char *device,
                                 AVDictionary *opts, int flags);
-int av_amf_context_internal_free(void *opaque, uint8_t *data);
+void av_amf_context_internal_free(void *opaque, uint8_t *data);
 int av_amf_context_derive(AVAMFDeviceContextInternal * internal,
                               AVHWDeviceContext *child_device_ctx, AVDictionary *opts,
                               int flags);

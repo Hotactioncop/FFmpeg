@@ -498,7 +498,7 @@ int av_amf_context_internal_create(AVAMFDeviceContextInternal * internal,
     return ret;
 }
 
-int av_amf_context_internal_free(void *opaque, uint8_t *data)
+void av_amf_context_internal_free(void *opaque, uint8_t *data)
 {
     AVAMFDeviceContextInternal *amf_ctx = (AVAMFDeviceContextInternal *)data;
     if (amf_ctx->context) {
@@ -519,7 +519,6 @@ int av_amf_context_internal_free(void *opaque, uint8_t *data)
     amf_ctx->debug = NULL;
     amf_ctx->version = 0;
     av_free(amf_ctx);
-    return 0;
 }
 
 int av_amf_context_derive(AVAMFDeviceContextInternal * internal,

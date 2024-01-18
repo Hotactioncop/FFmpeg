@@ -60,12 +60,18 @@ static int amf_scale_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_BGRA,
         AV_PIX_FMT_RGBA,
         AV_PIX_FMT_AMF,
+        AV_PIX_FMT_RGBAF16,
         AV_PIX_FMT_NONE,
     };
     static const enum AVPixelFormat output_pix_fmts_default[] = {
+        AV_PIX_FMT_NV12,
+        AV_PIX_FMT_P010,
+        AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_RGBA,
         AV_PIX_FMT_AMF,
         AV_PIX_FMT_D3D11,
         AV_PIX_FMT_DXVA2_VLD,
+        AV_PIX_FMT_RGBAF16,
         AV_PIX_FMT_NONE,
     };
     output_pix_fmts = output_pix_fmts_default;
@@ -87,11 +93,13 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     err = amf_init_scale_config(outlink, &in_format);
     if (err < 0)
         return err;
+    // FIXME: add checks whether we have HW context
 
     internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
     res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFHQScaler, &ctx->scaler);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFHQScaler, res);
 
+    // FIXME: add checks whether we have HW context
     out_size.width = outlink->w;
     out_size.height = outlink->h;
     AMF_ASSIGN_PROPERTY_SIZE(res, ctx->scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
