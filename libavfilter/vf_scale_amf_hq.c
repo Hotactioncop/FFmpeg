@@ -93,6 +93,12 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     err = amf_init_scale_config(outlink, &in_format);
     if (err < 0)
         return err;
+
+    // HQ scaler should be used for upscaling only
+    if (inlink->w > outlink->w || inlink->h > outlink->h) {
+        av_log(avctx, AV_LOG_ERROR, "AMF HQ scaler should be used for upscaling only.\n");
+        return AVERROR_UNKNOWN;
+    }
     // FIXME: add checks whether we have HW context
 
     internal = (AVAMFDeviceContextInternal * )ctx->amf_device_ctx_internal->data;
