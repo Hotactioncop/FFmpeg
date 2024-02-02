@@ -20998,9 +20998,6 @@ pixel format is used.
 @item force_divisible_by
 Work the same as the identical @ref{scale} filter options.
 
-@end table
-
-@table @option
 @anchor{color_profile}
 @item color_profile
 Specify all color properties at once.
@@ -21114,6 +21111,7 @@ SMPTE-432
 JEDEC P22 phosphors
 
 @end table
+@end table
 
 @subsection Examples
 
@@ -21129,7 +21127,6 @@ Upscale to 4K and change color profile to bt2020.
 @example
 scale_amf=4096:2160:color_profile=bt2020
 @end example
-
 @end itemize
 
 @anchor{scale_cuda}
