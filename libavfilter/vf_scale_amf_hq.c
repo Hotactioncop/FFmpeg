@@ -105,7 +105,6 @@ static int amf_scale_config_output(AVFilterLink *outlink)
     res = internal->factory->pVtbl->CreateComponent(internal->factory, internal->context, AMFHQScaler, &ctx->scaler);
     AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFHQScaler, res);
 
-    // FIXME: add checks whether we have HW context
     out_size.width = outlink->w;
     out_size.height = outlink->h;
     AMF_ASSIGN_PROPERTY_SIZE(res, ctx->scaler, AMF_HQ_SCALER_OUTPUT_SIZE, out_size);
@@ -148,12 +147,6 @@ static const AVOption scale_amf_hq_options[] = {
     { "sr1-0",          "Video SR1.0",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_0 }, 0, 0, FLAGS, "algorithm" },
     { "point",          "Point",                0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_POINT }, 0, 0, FLAGS, "algorithm" },
     { "sr1-1",          "Video SR1.1",          0,  AV_OPT_TYPE_CONST, { .i64 = AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1 }, 0, 0, FLAGS, "algorithm" },
-
-    { "force_original_aspect_ratio", "decrease or increase w/h if necessary to keep the original AR", OFFSET(force_original_aspect_ratio), AV_OPT_TYPE_INT, { .i64 = 0}, 0, 2, FLAGS, "force_oar" },
-    { "disable",  NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 0 }, 0, 0, FLAGS, "force_oar" },
-    { "decrease", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1 }, 0, 0, FLAGS, "force_oar" },
-    { "increase", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 2 }, 0, 0, FLAGS, "force_oar" },
-    { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1}, 1, 256, FLAGS },
 
     { NULL },
 };
