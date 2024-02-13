@@ -101,9 +101,13 @@ static int amf_init_decoder(AVCodecContext *avctx)
     amf_int64               color_profile;
     int                     pool_size = 25;
 
-    if (avctx->pix_fmt == AV_PIX_FMT_AMF)
-        output_format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
-    else
+    if (avctx->pix_fmt == AV_PIX_FMT_AMF){
+        if (avctx->hw_frames_ctx) {
+            AVHWFramesContext *hwframes_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+            output_format = av_amf_av_to_amf_format(hwframes_ctx->sw_format);
+        } else
+            output_format = av_amf_av_to_amf_format(avctx->sw_pix_fmt);
+    } else
         output_format = av_amf_av_to_amf_format(avctx->pix_fmt);
 
     if (output_format == AMF_SURFACE_UNKNOWN)
@@ -321,7 +325,7 @@ static int amf_decode_init(AVCodecContext *avctx)
         hwframes_ctx->width             = FFALIGN(avctx->coded_width,  32);
         hwframes_ctx->height            = FFALIGN(avctx->coded_height, 32);
         hwframes_ctx->format            = AV_PIX_FMT_AMF;
-        hwframes_ctx->sw_format         = avctx->sw_pix_fmt;
+        hwframes_ctx->sw_format         = avctx->sw_pix_fmt == AV_PIX_FMT_YUV420P10 ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
         hwframes_ctx->initial_pool_size = ctx->surface_pool_size;
         avctx->pix_fmt = AV_PIX_FMT_AMF;
 
