@@ -135,7 +135,7 @@ static int vble_decode_frame(AVCodecContext *avctx, AVFrame *pic,
         return ret;
 
     /* Set flags */
-    pic->key_frame = 1;
+    pic->flags |= AV_FRAME_FLAG_KEY;
     pic->pict_type = AV_PICTURE_TYPE_I;
 
     /* Version should always be 1 */
@@ -203,7 +203,7 @@ static av_cold int vble_decode_init(AVCodecContext *avctx)
 
 const FFCodec ff_vble_decoder = {
     .p.name         = "vble",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("VBLE Lossless Codec"),
+    CODEC_LONG_NAME("VBLE Lossless Codec"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VBLE,
     .priv_data_size = sizeof(VBLEContext),

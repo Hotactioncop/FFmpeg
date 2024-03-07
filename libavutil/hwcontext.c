@@ -36,6 +36,9 @@ static const HWContextType * const hw_table[] = {
 #if CONFIG_D3D11VA
     &ff_hwcontext_type_d3d11va,
 #endif
+#if CONFIG_D3D12VA
+    &ff_hwcontext_type_d3d12va,
+#endif
 #if CONFIG_LIBDRM
     &ff_hwcontext_type_drm,
 #endif
@@ -71,6 +74,7 @@ static const char *const hw_type_names[] = {
     [AV_HWDEVICE_TYPE_DRM]    = "drm",
     [AV_HWDEVICE_TYPE_DXVA2]  = "dxva2",
     [AV_HWDEVICE_TYPE_D3D11VA] = "d3d11va",
+    [AV_HWDEVICE_TYPE_D3D12VA] = "d3d12va",
     [AV_HWDEVICE_TYPE_OPENCL] = "opencl",
     [AV_HWDEVICE_TYPE_QSV]    = "qsv",
     [AV_HWDEVICE_TYPE_VAAPI]  = "vaapi",
@@ -201,18 +205,11 @@ fail:
 int av_hwdevice_ctx_init(AVBufferRef *ref)
 {
     AVHWDeviceContext *ctx = (AVHWDeviceContext*)ref->data;
-    int ret;
+    int ret = 0;
 
-    if (ctx->internal->hw_type->device_init) {
+    if (ctx->internal->hw_type->device_init)
         ret = ctx->internal->hw_type->device_init(ctx);
-        if (ret < 0)
-            goto fail;
-    }
 
-    return 0;
-fail:
-    if (ctx->internal->hw_type->device_uninit)
-        ctx->internal->hw_type->device_uninit(ctx);
     return ret;
 }
 
@@ -293,8 +290,7 @@ AVBufferRef *av_hwframe_ctx_alloc(AVBufferRef *device_ref_in)
     return buf;
 
 fail:
-    if (device_ref)
-        av_buffer_unref(&device_ref);
+    av_buffer_unref(&device_ref);
     if (ctx->internal)
         av_freep(&ctx->internal->priv);
     av_freep(&ctx->internal);
@@ -363,7 +359,7 @@ int av_hwframe_ctx_init(AVBufferRef *ref)
     if (ctx->internal->hw_type->frames_init) {
         ret = ctx->internal->hw_type->frames_init(ctx);
         if (ret < 0)
-            goto fail;
+            return ret;
     }
 
     if (ctx->internal->pool_internal && !ctx->pool)
@@ -373,14 +369,10 @@ int av_hwframe_ctx_init(AVBufferRef *ref)
     if (ctx->initial_pool_size > 0) {
         ret = hwframe_pool_prealloc(ref);
         if (ret < 0)
-            goto fail;
+            return ret;
     }
 
     return 0;
-fail:
-    if (ctx->internal->hw_type->frames_uninit)
-        ctx->internal->hw_type->frames_uninit(ctx);
-    return ret;
 }
 
 int av_hwframe_transfer_get_formats(AVBufferRef *hwframe_ref,
@@ -397,9 +389,13 @@ int av_hwframe_transfer_get_formats(AVBufferRef *hwframe_ref,
 
 static int transfer_data_alloc(AVFrame *dst, const AVFrame *src, int flags)
 {
-    AVHWFramesContext *ctx = (AVHWFramesContext*)src->hw_frames_ctx->data;
+    AVHWFramesContext *ctx;
     AVFrame *frame_tmp;
     int ret = 0;
+
+    if (!src->hw_frames_ctx)
+        return AVERROR(EINVAL);
+    ctx = (AVHWFramesContext*)src->hw_frames_ctx->data;
 
     frame_tmp = av_frame_alloc();
     if (!frame_tmp)
@@ -815,8 +811,7 @@ int av_hwframe_map(AVFrame *dst, const AVFrame *src, int flags)
                 return AVERROR(EINVAL);
             }
             hwmap = (HWMapDescriptor*)src->buf[0]->data;
-            av_frame_unref(dst);
-            return av_frame_ref(dst, hwmap->source);
+            return av_frame_replace(dst, hwmap->source);
         }
     }
 
@@ -946,6 +941,5 @@ fail:
 int ff_hwframe_map_replace(AVFrame *dst, const AVFrame *src)
 {
     HWMapDescriptor *hwmap = (HWMapDescriptor*)dst->buf[0]->data;
-    av_frame_unref(hwmap->source);
-    return av_frame_ref(hwmap->source, src);
+    return av_frame_replace(hwmap->source, src);
 }

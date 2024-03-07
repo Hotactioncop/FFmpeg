@@ -62,7 +62,7 @@ cglobal pred16x16_vertical_8, 2,3
     lea   r0, [r0+r1*2]
     dec   r2
     jg .loop
-    REP_RET
+    RET
 
 ;-----------------------------------------------------------------------------
 ; void ff_pred16x16_horizontal_8(uint8_t *src, ptrdiff_t stride)
@@ -86,8 +86,6 @@ cglobal pred16x16_horizontal_8, 2,3
     punpcklbw m1, m1
     SPLATW    m0, m0, 3
     SPLATW    m1, m1, 3
-    mova [r0+r1*0+8], m0
-    mova [r0+r1*1+8], m1
 %endif
 
     mova [r0+r1*0], m0
@@ -95,10 +93,10 @@ cglobal pred16x16_horizontal_8, 2,3
     lea       r0, [r0+r1*2]
     dec       r2
     jg .loop
-    REP_RET
+    RET
 %endmacro
 
-INIT_MMX mmxext
+INIT_XMM sse2
 PRED16x16_H
 INIT_XMM ssse3
 PRED16x16_H
@@ -146,7 +144,7 @@ cglobal pred16x16_dc_8, 2,7
     lea   r4, [r4+r1*2]
     dec   r3d
     jg .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse2
@@ -192,7 +190,7 @@ cglobal pred16x16_tm_vp8_8, 2,6,6
     lea          r0, [r0+r1*2]
     dec         r5d
     jg .loop
-    REP_RET
+    RET
 
 %if HAVE_AVX2_EXTERNAL
 INIT_YMM avx2
@@ -228,7 +226,7 @@ cglobal pred16x16_tm_vp8_8, 2, 4, 5, dst, stride, stride3, iteration
     lea                       dstq, [dstq+strideq*4]
     dec                 iterationd
     jg .loop
-    REP_RET
+    RET
 %endif
 
 ;-----------------------------------------------------------------------------
@@ -427,7 +425,7 @@ cglobal pred16x16_plane_%1_8, 2,9,7
     lea          r0, [r0+r2*2]
     dec          r4
     jg .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse2
@@ -556,7 +554,7 @@ ALIGN 16
     lea          r0, [r0+r2*2]
     dec          r4
     jg .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_XMM sse2
@@ -568,17 +566,17 @@ H264_PRED8x8_PLANE
 ; void ff_pred8x8_vertical_8(uint8_t *src, ptrdiff_t stride)
 ;-----------------------------------------------------------------------------
 
-INIT_MMX mmx
+INIT_XMM sse2
 cglobal pred8x8_vertical_8, 2,2
     sub    r0, r1
-    movq  mm0, [r0]
+    movq   m0, [r0]
 %rep 3
-    movq [r0+r1*1], mm0
-    movq [r0+r1*2], mm0
+    movq [r0+r1*1], m0
+    movq [r0+r1*2], m0
     lea    r0, [r0+r1*2]
 %endrep
-    movq [r0+r1*1], mm0
-    movq [r0+r1*2], mm0
+    movq [r0+r1*1], m0
+    movq [r0+r1*2], m0
     RET
 
 ;-----------------------------------------------------------------------------
@@ -599,7 +597,7 @@ cglobal pred8x8_horizontal_8, 2,3
     lea       r0, [r0+r1*2]
     dec       r2
     jg .loop
-    REP_RET
+    RET
 %endmacro
 
 INIT_MMX mmxext
@@ -737,7 +735,7 @@ cglobal pred8x8_dc_rv40_8, 2,7
     lea   r4, [r4+r1*2]
     dec   r3d
     jg .loop
-    REP_RET
+    RET
 
 ;-----------------------------------------------------------------------------
 ; void ff_pred8x8_tm_vp8_8(uint8_t *src, ptrdiff_t stride)
@@ -770,7 +768,7 @@ cglobal pred8x8_tm_vp8_8, 2,6,4
     lea          r0, [r0+r1*2]
     dec         r5d
     jg .loop
-    REP_RET
+    RET
 
 INIT_XMM ssse3
 cglobal pred8x8_tm_vp8_8, 2,3,6
@@ -797,7 +795,7 @@ cglobal pred8x8_tm_vp8_8, 2,3,6
     lea          r0, [r0+r1*2]
     dec         r2d
     jg .loop
-    REP_RET
+    RET
 
 ; dest, left, right, src, tmp
 ; output: %1 = (t[n-1] + t[n]*2 + t[n+1] + 2) >> 2
@@ -1802,7 +1800,7 @@ cglobal pred4x4_tm_vp8_8, 3,6
     lea        r0, [r0+r2*2]
     dec       r5d
     jg .loop
-    REP_RET
+    RET
 
 INIT_XMM ssse3
 cglobal pred4x4_tm_vp8_8, 3,3

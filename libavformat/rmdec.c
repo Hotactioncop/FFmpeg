@@ -51,8 +51,8 @@ struct RMStream {
     int64_t audiotimestamp; ///< Audio packet timestamp
     int sub_packet_cnt; // Subpacket counter, used while reading
     int sub_packet_size, sub_packet_h, coded_framesize; ///< Descrambling parameters from container
-    int audio_framesize; /// Audio frame size from container
-    int sub_packet_lengths[16]; /// Length of each subpacket
+    int audio_framesize; ///< Audio frame size from container
+    int sub_packet_lengths[16]; ///< Length of each subpacket
     int32_t deint_id;  ///< deinterleaver used in audio stream
 };
 
@@ -563,6 +563,8 @@ static int rm_read_header(AVFormatContext *s)
     }
 
     tag_size = avio_rb32(pb);
+    if (tag_size < 0)
+        return AVERROR_INVALIDDATA;
     avio_skip(pb, tag_size - 8);
 
     for(;;) {

@@ -169,7 +169,7 @@ void ff_rfps_calculate(AVFormatContext *ic);
  * Useful to simplify the rescaling of the arguments of AVInputFormat::read_seek2()
  *
  * @param[in] tb_in      Timebase of the input `min_ts`, `ts` and `max_ts`
- * @param[in] tb_out     Timebase of the ouput `min_ts`, `ts` and `max_ts`
+ * @param[in] tb_out     Timebase of the output `min_ts`, `ts` and `max_ts`
  * @param[in,out] min_ts Lower bound of the interval
  * @param[in,out] ts     Timestamp
  * @param[in,out] max_ts Upper bound of the interval
@@ -237,5 +237,7 @@ int ff_get_extradata(void *logctx, AVCodecParameters *par, AVIOContext *pb, int 
  * @return stream index, or < 0 on error
  */
 int ff_find_stream_index(const AVFormatContext *s, int id);
+
+int ff_buffer_packet(AVFormatContext *s, AVPacket *pkt);
 
 #endif /* AVFORMAT_DEMUX_H */

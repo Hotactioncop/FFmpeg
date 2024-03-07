@@ -86,7 +86,7 @@ typedef struct DNXHDEncContext {
     uint16_t (*qmatrix_c16)[2][64];
 
     unsigned frame_bits;
-    uint8_t *src[3];
+    const uint8_t *src[3];
 
     uint32_t *orig_vlc_codes;
     uint8_t  *orig_vlc_bits;
@@ -111,6 +111,7 @@ typedef struct DNXHDEncContext {
                                const uint8_t *pixels, ptrdiff_t line_size);
 } DNXHDEncContext;
 
+void ff_dnxhdenc_init(DNXHDEncContext *ctx);
 void ff_dnxhdenc_init_x86(DNXHDEncContext *ctx);
 
 #endif /* AVCODEC_DNXHDENC_H */
