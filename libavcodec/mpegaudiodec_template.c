@@ -36,8 +36,8 @@
 #include "libavutil/thread.h"
 
 #include "avcodec.h"
+#include "decode.h"
 #include "get_bits.h"
-#include "internal.h"
 #include "mathops.h"
 #include "mpegaudiodsp.h"
 
@@ -374,7 +374,7 @@ static int handle_crc(MPADecodeContext *s, int sec_len)
         crc_val = av_crc(crc_tab, crc_val, &buf[6], sec_byte_len);
 
         AV_WB32(tmp_buf,
-                ((buf[6 + sec_byte_len] & (0xFF00 >> sec_rem_bits)) << 24) +
+                ((buf[6 + sec_byte_len] & (0xFF00U >> sec_rem_bits)) << 24) +
                 ((s->crc << 16) >> sec_rem_bits));
 
         crc_val = av_crc(crc_tab, crc_val, tmp_buf, 3);
@@ -760,6 +760,7 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
     /* low frequencies (called big values) */
     s_index = 0;
     for (i = 0; i < 3; i++) {
+        const VLCElem *vlctab;
         int j, k, l, linbits;
         j = g->region_size[i];
         if (j == 0)
@@ -768,13 +769,13 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
         k       = g->table_select[i];
         l       = ff_mpa_huff_data[k][0];
         linbits = ff_mpa_huff_data[k][1];
-        vlc     = &ff_huff_vlc[l];
 
         if (!l) {
             memset(&g->sb_hybrid[s_index], 0, sizeof(*g->sb_hybrid) * 2 * j);
             s_index += 2 * j;
             continue;
         }
+        vlctab  = ff_huff_vlc[l];
 
         /* read huffcode and compute each couple */
         for (; j > 0; j--) {
@@ -787,7 +788,7 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
                 if (pos >= end_pos)
                     break;
             }
-            y = get_vlc2(&s->gb, vlc->table, 7, 3);
+            y = get_vlc2(&s->gb, vlctab, 7, 3);
 
             if (!y) {
                 g->sb_hybrid[s_index    ] =

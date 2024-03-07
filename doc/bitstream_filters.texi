@@ -382,9 +382,6 @@ This applies a specific fixup to some Blu-ray streams which contain
 redundant PPSs modifying irrelevant parameters of the stream which
 confuse other transformations which require correct extradata.
 
-A new single global PPS is created, and all of the redundant PPSs
-within the stream are removed.
-
 @section hevc_metadata
 
 Modify metadata embedded in an HEVC stream.
@@ -530,10 +527,6 @@ Extract a representable text file from MOV subtitles, stripping the
 metadata header from each subtitle packet.
 
 See also the @ref{text2movsub} filter.
-
-@section mp3decomp
-
-Decompress non-standard compressed MP3 audio headers.
 
 @section mpeg2_metadata
 
@@ -884,6 +877,15 @@ The sample rate of stream packet belongs.
 @item NOPTS
 The AV_NOPTS_VALUE constant.
 @end table
+
+For example, to set PTS equal to DTS (not recommended if B-frames are involved):
+@example
+ffmpeg -i INPUT -c:a copy -bsf:a setts=pts=DTS out.mkv
+@end example
+
+@section showinfo
+Log basic packet information. Mainly useful for testing, debugging,
+and development.
 
 @anchor{text2movsub}
 @section text2movsub

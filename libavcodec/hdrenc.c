@@ -173,11 +173,12 @@ static int hdr_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
 const FFCodec ff_hdr_encoder = {
     .p.name         = "hdr",
-    .p.long_name    = NULL_IF_CONFIG_SMALL("HDR (Radiance RGBE format) image"),
+    CODEC_LONG_NAME("HDR (Radiance RGBE format) image"),
     .priv_data_size = sizeof(HDREncContext),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_RADIANCE_HDR,
-    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .init           = hdr_encode_init,
     FF_CODEC_ENCODE_CB(hdr_encode_frame),
     .close          = hdr_encode_close,
