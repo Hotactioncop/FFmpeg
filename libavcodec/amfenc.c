@@ -468,6 +468,7 @@ static int amf_copy_buffer(AVCodecContext *avctx, AVPacket *pkt, AMFBuffer *buff
             if (var.int64Value == AMF_VIDEO_ENCODER_AV1_OUTPUT_FRAME_TYPE_KEY) {
                 pkt->flags = AV_PKT_FLAG_KEY;
             }
+            break;
         default:
             break;
     }

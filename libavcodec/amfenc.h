@@ -59,6 +59,7 @@ typedef struct AmfContext {
     AMFContext         *context; ///< AMF context
     //encoder
     AMFComponent       *encoder; ///< AMF encoder object
+    AMFCaps            *encoder_caps;
     amf_bool            eof;     ///< flag indicating EOF happened
     AMF_SURFACE_FORMAT  format;  ///< AMF surface format
 
@@ -85,6 +86,7 @@ typedef struct AmfContext {
     int                 usage;
     int                 profile;
     int                 level;
+    int                 latency;
     int                 preencode;
     int                 quality;
     int                 b_frame_delta_qp;
@@ -112,6 +114,7 @@ typedef struct AmfContext {
     int                 max_b_frames;
     int                 qvbr_quality_level;
     int                 hw_high_motion_quality_boost;
+    int                 encoder_instance_id;
 
     // HEVC - specific options
 
@@ -126,6 +129,7 @@ typedef struct AmfContext {
     // AV1 - specific options
 
     enum AMF_VIDEO_ENCODER_AV1_ALIGNMENT_MODE_ENUM                 align;
+    enum AMF_VIDEO_ENCODER_AV1_AQ_MODE_ENUM                        aq_mode;
 
     // Preanalysis - specific options
 
