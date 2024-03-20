@@ -28,6 +28,7 @@
 
 #include "movenc.h"
 #include "avformat.h"
+#include "avlanguage.h"
 #include "avio_internal.h"
 #include "dovi_isom.h"
 #include "riff.h"
@@ -4070,7 +4071,14 @@ static int mov_write_3gp_udta_tag(AVIOContext *pb, AVDictionary *metadata,
     if (!strcmp(tag, "yrrc"))
         avio_wb16(pb, atoi(t->value));
     else {
-        avio_wb16(pb, language_code("eng")); /* language */
+        int lang = 0, len;
+        len = strlen(t->key);
+        if (t->key[len - 4] == '-') {
+            lang = ff_mov_iso639_to_lang(&t->key[len - 3], 1);
+        }
+        if (!lang)
+            lang = ff_mov_iso639_to_lang("und", 1);
+        avio_wb16(pb, lang); /* language */
         avio_write(pb, t->value, strlen(t->value) + 1); /* UTF8 string value */
         if (!strcmp(tag, "albm") &&
             (t = av_dict_get(metadata, "track", NULL, 0)))
@@ -4154,8 +4162,21 @@ static int mov_write_track_udta_tag(AVIOContext *pb, MOVMuxContext *mov,
         return ret;
 
     if (mov->mode & (MODE_MP4|MODE_MOV)) {
+        AVDictionaryEntry *t = NULL;
+        int und = 0;
+
         mov_write_track_metadata(pb_buf, st, "name", "title");
-        mov_write_3gp_udta_tag(pb_buf, st->metadata, "titl", "title");
+        while ((t = av_dict_get(st->metadata, "title-", t, AV_DICT_IGNORE_SUFFIX))) {
+            int len = strlen(t->key);
+            if (len == 10 &&
+                ff_convert_lang_to(&t->key[len - 3], AV_LANG_ISO639_2_BIBL)) {
+                mov_write_3gp_udta_tag(pb_buf, st->metadata, "titl", t->key);
+                if (!strcmp("und", &t->key[len - 3]))
+                    und = 1;
+            }
+        }
+        if (!und)
+            mov_write_3gp_udta_tag(pb_buf, st->metadata, "titl", "title");
     }
 
     if (mov->mode & MODE_MP4) {
