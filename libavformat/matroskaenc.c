@@ -2895,6 +2895,16 @@ static int mkv_check_new_extra_data(AVFormatContext *s, const AVPacket *pkt)
     case AV_CODEC_ID_AAC:
         if (side_data_size && mkv->track.bc) {
             int output_sample_rate = 0;
+            if (par->extradata && par->extradata_size) {
+                if (par->extradata_size != side_data_size ||
+                    memcmp(par->extradata, side_data, side_data_size)) {
+                    av_log(s, AV_LOG_ERROR, "Error, AAC extradata changed mid-stream.\n");
+                    return AVERROR(EINVAL);
+                } else {
+                    // Already written
+                    break;
+                }
+            }
             ret = get_aac_sample_rates(s, mkv, side_data, side_data_size,
                                        &track->sample_rate, &output_sample_rate);
             if (ret < 0)
