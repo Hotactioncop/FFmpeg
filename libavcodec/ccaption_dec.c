@@ -889,12 +889,13 @@ static int decode(AVCodecContext *avctx, AVSubtitle *sub,
 
         if (ctx->buffer[bidx].str[0] || ctx->real_time) {
             ff_dlog(ctx, "cdp writing data (%s)\n", ctx->buffer[bidx].str);
-            start_time = ctx->buffer_time[0];
-            sub->pts = start_time;
-            end_time = ctx->buffer_time[1];
-            if (!ctx->real_time)
+            if (!ctx->real_time) {
+                start_time = ctx->buffer_time[0];
+                sub->pts = start_time;
+                end_time = ctx->buffer_time[1];
                 sub->end_display_time = av_rescale_q(end_time - start_time,
                                                      AV_TIME_BASE_Q, ms_tb);
+            }
             else
                 sub->end_display_time = -1;
             ret = ff_ass_add_rect2(sub, ctx->buffer[bidx].str, ctx->readorder++, 0, NULL, NULL, &nb_rect_allocated);
