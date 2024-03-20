@@ -45,6 +45,7 @@ typedef struct DVDSubContext
   int      buf_size;
   int      forced_subs_only;
   uint8_t  used_color[256];
+  int64_t  pts;
 } DVDSubContext;
 
 static void yuv_a_to_rgba(const uint8_t *ycbcr, const uint8_t *alpha, uint32_t *rgba, int num_values)
@@ -534,10 +535,13 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
     int appended = 0;
     int is_menu;
 
+    if (ctx->pts == AV_NOPTS_VALUE && sub->pts != AV_NOPTS_VALUE)
+        ctx->pts = sub->pts;
     if (ctx->buf_size) {
         int ret = append_to_cached_buf(avctx, buf, buf_size);
         if (ret < 0) {
             *data_size = 0;
+            ctx->pts = AV_NOPTS_VALUE;
             return ret;
         }
         buf = ctx->buf;
@@ -550,6 +554,7 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
         *data_size = 0;
         int ret = appended ? 0 : append_to_cached_buf(avctx, buf, buf_size);
         if (ret < 0) {
+            ctx->pts = AV_NOPTS_VALUE;
             return ret;
         }
         return buf_size;
@@ -561,6 +566,7 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
         reset_rects(sub);
         *data_size = 0;
 
+        ctx->pts = AV_NOPTS_VALUE;
         return buf_size;
     }
     if (!is_menu && find_smallest_bounding_rectangle(ctx, sub) == 0)
@@ -571,6 +577,8 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
 
     ctx->buf_size = 0;
     *data_size = 1;
+    sub->pts = ctx->pts;
+    ctx->pts = AV_NOPTS_VALUE;
     return buf_size;
 }
 
@@ -696,6 +704,7 @@ static av_cold int dvdsub_init(AVCodecContext *avctx)
             av_log(avctx, AV_LOG_DEBUG, " 0x%06"PRIx32, ctx->palette[i]);
         av_log(avctx, AV_LOG_DEBUG, "\n");
     }
+    ctx->pts = AV_NOPTS_VALUE;
 
     return 1;
 }
