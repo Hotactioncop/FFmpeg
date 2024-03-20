@@ -915,6 +915,23 @@ static int videotoolbox_start(AVCodecContext *avctx)
         break;
     }
 
+#if ARCH_X86_64
+    if (avctx->codec_id == AV_CODEC_ID_H264 &&
+        avctx->sw_pix_fmt == AV_PIX_FMT_YUV420P10)
+    {
+        // 10-bit H.264 is not supported on x86_64
+        return AVERROR(ENOSYS);
+    }
+#endif
+
+    if (avctx->codec_id == AV_CODEC_ID_H264 &&
+        (avctx->level == 61 || avctx->level == 62))
+    {
+        // H.264 Level 6.1 and 6.2 can't be
+        // decoded properly
+        return AVERROR(ENOSYS);
+    }
+
 #if defined(MAC_OS_X_VERSION_10_9) && !TARGET_OS_IPHONE && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9) && AV_HAS_BUILTIN(__builtin_available)
     if (avctx->codec_id == AV_CODEC_ID_PRORES) {
         if (__builtin_available(macOS 10.9, *)) {
