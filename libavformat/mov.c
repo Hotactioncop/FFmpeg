@@ -8632,6 +8632,23 @@ fail:
     return ret;
 }
 
+static int mov_read_fall(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVStream *st;
+    MOVStreamContext *sc;
+
+    if (c->fc->nb_streams < 1)
+        return 0;
+    st = c->fc->streams[c->fc->nb_streams-1];
+    sc = st->priv_data;
+
+    sc->fallback = avio_rb32(pb);
+    sc->has_fallback = 1;
+
+    return 0;
+}
+
+
 static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('A','C','L','R'), mov_read_aclr },
 { MKTAG('A','P','R','G'), mov_read_avid },
@@ -8730,6 +8747,7 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('v','p','c','C'), mov_read_vpcc },
 { MKTAG('m','d','c','v'), mov_read_mdcv },
 { MKTAG('c','l','l','i'), mov_read_clli },
+{ MKTAG('f','a','l','l'), mov_read_fall },
 { MKTAG('d','v','c','C'), mov_read_dvcc_dvvc },
 { MKTAG('d','v','v','C'), mov_read_dvcc_dvvc },
 { MKTAG('d','v','w','C'), mov_read_dvcc_dvvc },
@@ -9847,6 +9865,23 @@ static int mov_read_header(AVFormatContext *s)
             err = ff_replaygain_export(st, s->metadata);
             if (err < 0)
                 return err;
+            if (sc->has_fallback) {
+                for (j = 0; j < s->nb_streams; j++) {
+                    if (s->streams[j]->id == sc->fallback) {
+                        AVPacketSideData *sd;
+                        int *fallback;
+                        sd = av_packet_side_data_new(&st->codecpar->coded_side_data,
+                                 &st->codecpar->nb_coded_side_data,
+                                 AV_PKT_DATA_FALLBACK_TRACK,
+                                 sizeof(int), 0);
+                        if (!sd)
+                            return AVERROR(ENOMEM);
+                        fallback = (int*)sd->data;
+                        *fallback = j;
+                        break;
+                    }
+                }
+            }
             break;
         case AVMEDIA_TYPE_VIDEO:
             if (sc->display_matrix) {
