@@ -4,9 +4,6 @@
  * Copyright (c) 2011 Anatoliy Wasserman
  * Copyright (c) 2012 Konstantin Shishkov
  *
- * This encoder appears to be based on Anatoliy Wassermans considering
- * similarities in the bugs.
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -24,6 +21,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -345,7 +343,7 @@ static void get_slice_data(ProresContext *ctx, const uint16_t *src,
 
 static void get_alpha_data(ProresContext *ctx, const uint16_t *src,
                            ptrdiff_t linesize, int x, int y, int w, int h,
-                           int16_t *blocks, int mbs_per_slice, int abits)
+                           uint16_t *blocks, int mbs_per_slice, int abits)
 {
     const int slice_width = 16 * mbs_per_slice;
     int i, j, copy_w, copy_h;
@@ -479,7 +477,7 @@ static void put_alpha_diff(PutBitContext *pb, int cur, int prev, int abits)
     const int dsize = 1 << dbits - 1;
     int diff = cur - prev;
 
-    diff = av_mod_uintp2(diff, abits);
+    diff = av_zero_extend(diff, abits);
     if (diff >= (1 << abits) - dsize)
         diff -= 1 << abits;
     if (diff < -dsize || diff > dsize || !diff) {
@@ -723,7 +721,7 @@ static int est_alpha_diff(int cur, int prev, int abits)
     const int dsize = 1 << dbits - 1;
     int diff = cur - prev;
 
-    diff = av_mod_uintp2(diff, abits);
+    diff = av_zero_extend(diff, abits);
     if (diff >= (1 << abits) - dsize)
         diff -= 1 << abits;
     if (diff < -dsize || diff > dsize || !diff)

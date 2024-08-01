@@ -37,9 +37,9 @@
 #include "avstring.h"
 #include "imgutils.h"
 #include "hwcontext.h"
-#include "avassert.h"
 #include "hwcontext_internal.h"
 #include "hwcontext_vulkan.h"
+#include "mem.h"
 
 #include "vulkan.h"
 #include "vulkan_loader.h"
@@ -446,7 +446,7 @@ static const VulkanOptExtension optional_device_exts[] = {
     { VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,               FF_VK_EXT_VIDEO_DECODE_QUEUE     },
     { VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,                FF_VK_EXT_VIDEO_DECODE_H264      },
     { VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,                FF_VK_EXT_VIDEO_DECODE_H265      },
-    { "VK_MESA_video_decode_av1",                             FF_VK_EXT_VIDEO_DECODE_AV1       },
+    { VK_KHR_VIDEO_DECODE_AV1_EXTENSION_NAME,                 FF_VK_EXT_VIDEO_DECODE_AV1       },
 };
 
 static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -1597,15 +1597,31 @@ static int vulkan_device_derive(AVHWDeviceContext *ctx,
 #if CONFIG_VAAPI
     case AV_HWDEVICE_TYPE_VAAPI: {
         AVVAAPIDeviceContext *src_hwctx = src_ctx->hwctx;
+        VADisplay dpy = src_hwctx->display;
+#if VA_CHECK_VERSION(1, 15, 0)
+        VAStatus vas;
+        VADisplayAttribute attr = {
+            .type = VADisplayPCIID,
+        };
+#endif
+        const char *vendor;
 
-        const char *vendor = vaQueryVendorString(src_hwctx->display);
-        if (!vendor) {
-            av_log(ctx, AV_LOG_ERROR, "Unable to get device info from VAAPI!\n");
-            return AVERROR_EXTERNAL;
+#if VA_CHECK_VERSION(1, 15, 0)
+        vas = vaGetDisplayAttributes(dpy, &attr, 1);
+        if (vas == VA_STATUS_SUCCESS && attr.flags != VA_DISPLAY_ATTRIB_NOT_SUPPORTED)
+            dev_select.pci_device = (attr.value & 0xFFFF);
+#endif
+
+        if (!dev_select.pci_device) {
+            vendor = vaQueryVendorString(dpy);
+            if (!vendor) {
+                av_log(ctx, AV_LOG_ERROR, "Unable to get device info from VAAPI!\n");
+                return AVERROR_EXTERNAL;
+            }
+
+            if (strstr(vendor, "AMD"))
+                dev_select.vendor_id = 0x1002;
         }
-
-        if (strstr(vendor, "AMD"))
-            dev_select.vendor_id = 0x1002;
 
         return vulkan_device_create_internal(ctx, &dev_select, 0, opts, flags);
     }
@@ -2406,10 +2422,10 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     /* If user did not specify a pool, hwfc->pool will be set to the internal one
      * in hwcontext.c just after this gets called */
     if (!hwfc->pool) {
-        hwfc->internal->pool_internal = av_buffer_pool_init2(sizeof(AVVkFrame),
-                                                             hwfc, vulkan_pool_alloc,
-                                                             NULL);
-        if (!hwfc->internal->pool_internal)
+        ffhwframesctx(hwfc)->pool_internal = av_buffer_pool_init2(sizeof(AVVkFrame),
+                                                                  hwfc, vulkan_pool_alloc,
+                                                                  NULL);
+        if (!ffhwframesctx(hwfc)->pool_internal)
             return AVERROR(ENOMEM);
     }
 
@@ -2495,7 +2511,7 @@ static inline VkFormat drm_to_vulkan_fmt(uint32_t drm_fourcc)
 }
 
 static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **frame,
-                                          const AVFrame *src)
+                                          const AVFrame *src, int flags)
 {
     int err = 0;
     VkResult ret;
@@ -2564,8 +2580,7 @@ static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **f
             .flags                 = 0x0,
             .tiling                = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
             .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED, /* specs say so */
-            .usage                 = VK_IMAGE_USAGE_SAMPLED_BIT |
-                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .usage                 = 0x0, /* filled in below */
             .samples               = VK_SAMPLE_COUNT_1_BIT,
             .pQueueFamilyIndices   = p->img_qfs,
             .queueFamilyIndexCount = p->nb_img_qfs,
@@ -2602,6 +2617,13 @@ static int vulkan_map_from_drm_frame_desc(AVHWFramesContext *hwfc, AVVkFrame **f
             .usage  = create_info.usage,
             .flags  = create_info.flags,
         };
+
+        if (flags & AV_HWFRAME_MAP_READ)
+            create_info.usage |= VK_IMAGE_USAGE_SAMPLED_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (flags & AV_HWFRAME_MAP_WRITE)
+            create_info.usage |= VK_IMAGE_USAGE_STORAGE_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
         /* Check if importing is possible for this combination of parameters */
         ret = vk->GetPhysicalDeviceImageFormatProperties2(hwctx->phys_dev,
@@ -2772,7 +2794,7 @@ static int vulkan_map_from_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     int err = 0;
     AVVkFrame *f;
 
-    if ((err = vulkan_map_from_drm_frame_desc(hwfc, &f, src)))
+    if ((err = vulkan_map_from_drm_frame_desc(hwfc, &f, src, flags)))
         return err;
 
     /* The unmapping function will free this */

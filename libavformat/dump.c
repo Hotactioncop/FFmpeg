@@ -32,6 +32,7 @@
 #include "libavutil/ambient_viewing_environment.h"
 #include "libavutil/dovi_meta.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/replaygain.h"
 #include "libavutil/spherical.h"
@@ -177,10 +178,6 @@ static void dump_paramchange(void *ctx, const AVPacketSideData *sd, int log_leve
     int size = sd->size;
     const uint8_t *data = sd->data;
     uint32_t flags, sample_rate, width, height;
-#if FF_API_OLD_CHANNEL_LAYOUT
-    uint32_t channels;
-    uint64_t layout;
-#endif
 
     if (!data || sd->size < 4)
         goto fail;
@@ -189,27 +186,6 @@ static void dump_paramchange(void *ctx, const AVPacketSideData *sd, int log_leve
     data += 4;
     size -= 4;
 
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (flags & AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_COUNT) {
-        if (size < 4)
-            goto fail;
-        channels = AV_RL32(data);
-        data += 4;
-        size -= 4;
-        av_log(ctx, log_level, "channel count %"PRIu32", ", channels);
-    }
-    if (flags & AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_LAYOUT) {
-        if (size < 8)
-            goto fail;
-        layout = AV_RL64(data);
-        data += 8;
-        size -= 8;
-        av_log(ctx, log_level,
-               "channel layout: %s, ", av_get_channel_name(layout));
-    }
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif /* FF_API_OLD_CHANNEL_LAYOUT */
     if (flags & AV_SIDE_DATA_PARAM_CHANGE_SAMPLE_RATE) {
         if (size < 4)
             goto fail;
@@ -283,7 +259,16 @@ static void dump_stereo3d(void *ctx, const AVPacketSideData *sd, int log_level)
 
     stereo = (const AVStereo3D *)sd->data;
 
-    av_log(ctx, log_level, "%s", av_stereo3d_type_name(stereo->type));
+    av_log(ctx, log_level, "%s, view: %s, primary eye: %s",
+           av_stereo3d_type_name(stereo->type), av_stereo3d_view_name(stereo->view),
+           av_stereo3d_primary_eye_name(stereo->primary_eye));
+    if (stereo->baseline)
+        av_log(ctx, log_level, ", baseline: %"PRIu32"", stereo->baseline);
+    if (stereo->horizontal_disparity_adjustment.num && stereo->horizontal_disparity_adjustment.den)
+        av_log(ctx, log_level, ", horizontal_disparity_adjustment: %0.4f",
+               av_q2d(stereo->horizontal_disparity_adjustment));
+    if (stereo->horizontal_field_of_view.num && stereo->horizontal_field_of_view.den)
+        av_log(ctx, log_level, ", horizontal_field_of_view: %0.3f", av_q2d(stereo->horizontal_field_of_view));
 
     if (stereo->flags & AV_STEREO3D_FLAG_INVERT)
         av_log(ctx, log_level, " (inverted)");
@@ -405,10 +390,12 @@ static void dump_spherical(void *ctx, const AVCodecParameters *par,
 
     av_log(ctx, log_level, "%s ", av_spherical_projection_name(spherical->projection));
 
-    yaw = ((double)spherical->yaw) / (1 << 16);
-    pitch = ((double)spherical->pitch) / (1 << 16);
-    roll = ((double)spherical->roll) / (1 << 16);
-    av_log(ctx, log_level, "(%f/%f/%f) ", yaw, pitch, roll);
+    if (spherical->yaw || spherical->pitch || spherical->roll) {
+        yaw = ((double)spherical->yaw) / (1 << 16);
+        pitch = ((double)spherical->pitch) / (1 << 16);
+        roll = ((double)spherical->roll) / (1 << 16);
+        av_log(ctx, log_level, "(%f/%f/%f) ", yaw, pitch, roll);
+    }
 
     if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR_TILE) {
         size_t l, t, r, b;
@@ -429,13 +416,15 @@ static void dump_dovi_conf(void *ctx, const AVPacketSideData *sd,
         (const AVDOVIDecoderConfigurationRecord *)sd->data;
 
     av_log(ctx, log_level, "version: %d.%d, profile: %d, level: %d, "
-           "rpu flag: %d, el flag: %d, bl flag: %d, compatibility id: %d",
+           "rpu flag: %d, el flag: %d, bl flag: %d, compatibility id: %d, "
+           "compression: %d",
            dovi->dv_version_major, dovi->dv_version_minor,
            dovi->dv_profile, dovi->dv_level,
            dovi->rpu_present_flag,
            dovi->el_present_flag,
            dovi->bl_present_flag,
-           dovi->dv_bl_signal_compatibility_id);
+           dovi->dv_bl_signal_compatibility_id,
+           dovi->dv_md_compression);
 }
 
 static void dump_s12m_timecode(void *ctx, const AVStream *st, const AVPacketSideData *sd,
@@ -453,6 +442,23 @@ static void dump_s12m_timecode(void *ctx, const AVStream *st, const AVPacketSide
         av_timecode_make_smpte_tc_string2(tcbuf, st->avg_frame_rate, tc[j], 0, 0);
         av_log(ctx, log_level, "timecode - %s%s", tcbuf, j != tc[0] ? ", " : "");
     }
+}
+
+static void dump_cropping(void *ctx, const AVPacketSideData *sd)
+{
+    uint32_t top, bottom, left, right;
+
+    if (sd->size < sizeof(uint32_t) * 4) {
+        av_log(ctx, AV_LOG_ERROR, "invalid data\n");
+        return;
+    }
+
+    top    = AV_RL32(sd->data +  0);
+    bottom = AV_RL32(sd->data +  4);
+    left   = AV_RL32(sd->data +  8);
+    right  = AV_RL32(sd->data + 12);
+
+    av_log(ctx, AV_LOG_INFO, "%d/%d/%d/%d", left, right, top, bottom);
 }
 
 static void dump_sidedata(void *ctx, const AVStream *st, const char *indent,
@@ -529,6 +535,10 @@ static void dump_sidedata(void *ctx, const AVStream *st, const char *indent,
         case AV_PKT_DATA_AMBIENT_VIEWING_ENVIRONMENT:
             dump_ambient_viewing_environment_metadata(ctx, sd);
             break;
+        case AV_PKT_DATA_FRAME_CROPPING:
+            av_log(ctx, AV_LOG_INFO, "Frame cropping: ");
+            dump_cropping(ctx, sd);
+            break;
         default:
             av_log(ctx, log_level, "unknown side data type %d "
                    "(%"SIZE_SPECIFIER" bytes)", sd->type, sd->size);
@@ -577,6 +587,8 @@ static void dump_disposition(int disposition, int log_level)
         av_log(NULL, log_level, " (still image)");
     if (disposition & AV_DISPOSITION_NON_DIEGETIC)
         av_log(NULL, log_level, " (non-diegetic)");
+    if (disposition & AV_DISPOSITION_MULTILAYER)
+        av_log(NULL, log_level, " (multilayer)");
 }
 
 /* "user interface" functions */

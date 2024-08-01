@@ -31,6 +31,35 @@ index=0
 id=0x3f1
 nb_streams=4
 type=Tile Grid
+[COMPONENT]
+nb_tiles=4
+coded_width=2560
+coded_height=1440
+horizontal_offset=0
+vertical_offset=0
+width=2560
+height=1440
+[SUBCOMPONENT]
+stream_index=0
+tile_horizontal_offset=0
+tile_vertical_offset=0
+[/SUBCOMPONENT]
+[SUBCOMPONENT]
+stream_index=1
+tile_horizontal_offset=1280
+tile_vertical_offset=0
+[/SUBCOMPONENT]
+[SUBCOMPONENT]
+stream_index=2
+tile_horizontal_offset=0
+tile_vertical_offset=720
+[/SUBCOMPONENT]
+[SUBCOMPONENT]
+stream_index=3
+tile_horizontal_offset=1280
+tile_vertical_offset=720
+[/SUBCOMPONENT]
+[/COMPONENT]
 DISPOSITION:default=1
 DISPOSITION:dub=0
 DISPOSITION:original=0
@@ -49,6 +78,7 @@ DISPOSITION:descriptions=0
 DISPOSITION:metadata=0
 DISPOSITION:dependent=0
 DISPOSITION:still_image=0
+DISPOSITION:multilayer=0
 TAG:title=Derived image
 [STREAM]
 index=0
@@ -71,6 +101,7 @@ DISPOSITION:descriptions=0
 DISPOSITION:metadata=0
 DISPOSITION:dependent=1
 DISPOSITION:still_image=0
+DISPOSITION:multilayer=0
 [/STREAM]
 [STREAM]
 index=1
@@ -93,6 +124,7 @@ DISPOSITION:descriptions=0
 DISPOSITION:metadata=0
 DISPOSITION:dependent=1
 DISPOSITION:still_image=0
+DISPOSITION:multilayer=0
 [/STREAM]
 [STREAM]
 index=2
@@ -115,6 +147,7 @@ DISPOSITION:descriptions=0
 DISPOSITION:metadata=0
 DISPOSITION:dependent=1
 DISPOSITION:still_image=0
+DISPOSITION:multilayer=0
 [/STREAM]
 [STREAM]
 index=3
@@ -137,5 +170,6 @@ DISPOSITION:descriptions=0
 DISPOSITION:metadata=0
 DISPOSITION:dependent=1
 DISPOSITION:still_image=0
+DISPOSITION:multilayer=0
 [/STREAM]
 [/STREAM_GROUP]

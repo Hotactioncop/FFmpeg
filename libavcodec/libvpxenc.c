@@ -33,8 +33,8 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "libvpx.h"
 #include "packet_internal.h"
 #include "profiles.h"
@@ -48,6 +48,9 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
+
+#define IS_VP9(avctx) (CONFIG_LIBVPX_VP9_ENCODER && avctx->codec_id == AV_CODEC_ID_VP9)
+#define IS_VP8(avctx) (CONFIG_LIBVPX_VP8_ENCODER && avctx->codec_id == AV_CODEC_ID_VP8)
 
 /**
  * Portion of struct vpx_codec_cx_pkt from vpx_encoder.h.
@@ -68,9 +71,6 @@ typedef struct FrameData {
     int64_t pts;
     int64_t duration;
 
-#if FF_API_REORDERED_OPAQUE
-    int64_t      reordered_opaque;
-#endif
     void        *frame_opaque;
     AVBufferRef *frame_opaque_ref;
 
@@ -360,21 +360,20 @@ static int frame_data_submit(AVCodecContext *avctx, AVFifo *fifo,
     const struct vpx_codec_enc_cfg *enccfg = ctx->encoder.config.enc;
 
     FrameData fd = { .pts = frame->pts };
-
-    AVFrameSideData *av_uninit(sd);
     int ret;
 
-#if CONFIG_LIBVPX_VP9_ENCODER
-    // Keep HDR10+ if it has bit depth higher than 8 and
-    // it has PQ trc (SMPTE2084).
-    sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
-    if (avctx->codec_id == AV_CODEC_ID_VP9 && sd &&
+    if (IS_VP9(avctx) &&
+        // Keep HDR10+ if it has bit depth higher than 8 and
+        // it has PQ trc (SMPTE2084).
         enccfg->g_bit_depth > 8 && avctx->color_trc == AVCOL_TRC_SMPTE2084) {
-        fd.hdr10_plus = av_buffer_ref(sd->buf);
-        if (!fd.hdr10_plus)
-            return AVERROR(ENOMEM);
+        const AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+
+        if (sd) {
+            fd.hdr10_plus = av_buffer_ref(sd->buf);
+            if (!fd.hdr10_plus)
+                return AVERROR(ENOMEM);
+        }
     }
-#endif
 
     fd.duration     = frame->duration;
     fd.frame_opaque = frame->opaque;
@@ -383,11 +382,6 @@ static int frame_data_submit(AVCodecContext *avctx, AVFifo *fifo,
         if (ret < 0)
             goto fail;
     }
-#if FF_API_REORDERED_OPAQUE
-FF_DISABLE_DEPRECATION_WARNINGS
-    fd.reordered_opaque = frame->reordered_opaque;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
     ret = av_fifo_write(fifo, &fd, 1);
     if (ret < 0)
@@ -413,12 +407,6 @@ static int frame_data_apply(AVCodecContext *avctx, AVFifo *fifo, AVPacket *pkt)
                "this is a bug, please report it\n", pkt->pts, fd.pts);
         goto skip;
     }
-
-#if FF_API_REORDERED_OPAQUE
-FF_DISABLE_DEPRECATION_WARNINGS
-    avctx->reordered_opaque = fd.reordered_opaque;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
     pkt->duration = fd.duration;
     if (avctx->flags & AV_CODEC_FLAG_COPY_OPAQUE) {
@@ -696,7 +684,7 @@ static int vpx_ts_param_parse(VPxContext *ctx, struct vpx_codec_enc_cfg *enccfg,
         vp8_ts_parse_int_array(enccfg->ts_layer_id, value, value_len, VPX_TS_MAX_PERIODICITY);
     } else if (!strcmp(key, "ts_layering_mode")) {
         /* option for pre-defined temporal structures in function set_temporal_layer_pattern. */
-        ts_layering_mode = strtoul(value, &value, 4);
+        ts_layering_mode = strtoul(value, &value, 10);
     }
 
 #if (VPX_ENCODER_ABI_VERSION >= 12) && CONFIG_LIBVPX_VP9_ENCODER
@@ -798,7 +786,7 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
                        struct vpx_codec_enc_cfg *enccfg, vpx_codec_flags_t *flags,
                        vpx_img_fmt_t *img_fmt)
 {
-    VPxContext av_unused *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(avctx->pix_fmt);
     enccfg->g_bit_depth = enccfg->g_input_bit_depth = desc->comp[0].depth;
     switch (avctx->pix_fmt) {
@@ -2054,6 +2042,7 @@ const FFCodec ff_libvpx_vp8_encoder = {
     FF_CODEC_ENCODE_CB(vpx_encode),
     .close          = vpx_free,
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP |
                       FF_CODEC_CAP_AUTO_THREADS,
     .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVA420P, AV_PIX_FMT_NONE },
     .p.priv_class   = &class_vp8,
@@ -2130,6 +2119,7 @@ FFCodec ff_libvpx_vp9_encoder = {
     FF_CODEC_ENCODE_CB(vpx_encode),
     .close          = vpx_free,
     .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE |
+                      FF_CODEC_CAP_INIT_CLEANUP |
                       FF_CODEC_CAP_AUTO_THREADS,
     .defaults       = defaults,
     .init_static_data = vp9_init_static,

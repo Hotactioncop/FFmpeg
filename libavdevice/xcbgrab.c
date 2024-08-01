@@ -40,11 +40,13 @@
 
 #include "libavutil/internal.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
 #include "libavutil/time.h"
 
 #include "libavformat/avformat.h"
+#include "libavformat/demux.h"
 #include "libavformat/internal.h"
 
 typedef struct XCBGrabContext {
@@ -826,7 +828,10 @@ static av_cold int xcbgrab_read_header(AVFormatContext *s)
 
     if (!sscanf(s->url, "%[^+]+%d,%d", display_name, &c->x, &c->y)) {
         *display_name = 0;
-        sscanf(s->url, "+%d,%d", &c->x, &c->y);
+        if(sscanf(s->url, "+%d,%d", &c->x, &c->y) != 2) {
+            if (*s->url)
+                av_log(s, AV_LOG_WARNING, "Ambigous URL: %s\n", s->url);
+        }
     }
 
     c->conn = xcb_connect(display_name[0] ? display_name : NULL, &screen_num);
@@ -900,13 +905,13 @@ static av_cold int xcbgrab_read_header(AVFormatContext *s)
     return 0;
 }
 
-const AVInputFormat ff_xcbgrab_demuxer = {
-    .name           = "x11grab",
-    .long_name      = NULL_IF_CONFIG_SMALL("X11 screen capture, using XCB"),
+const FFInputFormat ff_xcbgrab_demuxer = {
+    .p.name         = "x11grab",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("X11 screen capture, using XCB"),
+    .p.flags        = AVFMT_NOFILE,
+    .p.priv_class   = &xcbgrab_class,
     .priv_data_size = sizeof(XCBGrabContext),
     .read_header    = xcbgrab_read_header,
     .read_packet    = xcbgrab_read_packet,
     .read_close     = xcbgrab_read_close,
-    .flags          = AVFMT_NOFILE,
-    .priv_class     = &xcbgrab_class,
 };

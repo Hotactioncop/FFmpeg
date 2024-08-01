@@ -26,6 +26,7 @@
 
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
@@ -35,7 +36,6 @@
 #include "bytestream.h"
 #include "lossless_videoencdsp.h"
 #include "put_bits.h"
-#include "mathops.h"
 #include "utvideo.h"
 #include "huffman.h"
 
@@ -239,7 +239,7 @@ static av_cold int utvideo_encode_init(AVCodecContext *avctx)
      * - Compression mode (none/huff)
      * And write the flags.
      */
-    c->flags  = (c->slices - 1) << 24;
+    c->flags  = (c->slices - 1U) << 24;
     c->flags |= 0 << 11; // bit field to signal interlaced encoding mode
     c->flags |= c->compression;
 

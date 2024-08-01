@@ -32,7 +32,7 @@
 
 #include "config_components.h"
 
-#include "libavutil/pixdesc.h"
+#include "libavutil/mem.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -80,7 +80,7 @@ static av_cold void init_uni_ac_vlc(const uint8_t huff_size_ac[256],
 
 static void mjpeg_encode_picture_header(MpegEncContext *s)
 {
-    ff_mjpeg_encode_picture_header(s->avctx, &s->pb, s->picture->f, s->mjpeg_ctx,
+    ff_mjpeg_encode_picture_header(s->avctx, &s->pb, s->cur_pic.ptr->f, s->mjpeg_ctx,
                                    s->intra_scantable.permutated, 0,
                                    s->intra_matrix, s->chroma_intra_matrix,
                                    s->slice_context_count > 1);
@@ -595,9 +595,7 @@ static int amv_encode_picture(AVCodecContext *avctx, AVPacket *pkt,
     MpegEncContext *s = avctx->priv_data;
     AVFrame *pic;
     int i, ret;
-    int chroma_h_shift, chroma_v_shift;
-
-    av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt, &chroma_h_shift, &chroma_v_shift);
+    int chroma_v_shift = 1; /* AMV is 420-only */
 
     if ((avctx->height & 15) && avctx->strict_std_compliance > FF_COMPLIANCE_UNOFFICIAL) {
         av_log(avctx, AV_LOG_ERROR,

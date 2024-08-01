@@ -29,6 +29,7 @@
 #include "libavutil/iamf.h"
 #include "libavutil/internal.h"
 #include "libavutil/intmath.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 /**
@@ -152,13 +153,6 @@ static int io_open_default(AVFormatContext *s, AVIOContext **pb,
     return ffio_open_whitelist(pb, url, flags, &s->interrupt_callback, options, s->protocol_whitelist, s->protocol_blacklist);
 }
 
-#if FF_API_AVFORMAT_IO_CLOSE
-void ff_format_io_close_default(AVFormatContext *s, AVIOContext *pb)
-{
-    avio_close(pb);
-}
-#endif
-
 static int io_close2_default(AVFormatContext *s, AVIOContext *pb)
 {
     return avio_close(pb);
@@ -175,11 +169,6 @@ AVFormatContext *avformat_alloc_context(void)
     s = &si->pub;
     s->av_class = &av_format_context_class;
     s->io_open  = io_open_default;
-#if FF_API_AVFORMAT_IO_CLOSE
-FF_DISABLE_DEPRECATION_WARNINGS
-    s->io_close = ff_format_io_close_default;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     s->io_close2= io_close2_default;
 
     av_opt_set_defaults(s);
@@ -230,7 +219,8 @@ const AVClass *avformat_get_class(void)
         { "descriptions",       .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_DESCRIPTIONS      },    .unit = "disposition" }, \
         { "metadata",           .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_METADATA          },    .unit = "disposition" }, \
         { "dependent",          .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_DEPENDENT         },    .unit = "disposition" }, \
-        { "still_image",        .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_STILL_IMAGE       },    .unit = "disposition" }
+        { "still_image",        .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_STILL_IMAGE       },    .unit = "disposition" }, \
+        { "multilayer",         .type = AV_OPT_TYPE_CONST, { .i64 = AV_DISPOSITION_MULTILAYER        },    .unit = "disposition" }
 
 static const AVOption stream_options[] = {
     DISPOSITION_OPT(AVStream),
@@ -328,7 +318,9 @@ AVStream *avformat_new_stream(AVFormatContext *s, const AVCodec *c)
         sti->pts_buffer[i] = AV_NOPTS_VALUE;
 
     st->sample_aspect_ratio = (AVRational) { 0, 1 };
+#if FF_API_INTERNAL_TIMING
     sti->transferred_mux_tb = (AVRational) { 0, 1 };;
+#endif
 
 #if FF_API_AVSTREAM_SIDE_DATA
     sti->inject_global_side_data = si->inject_global_side_data;

@@ -28,7 +28,7 @@
 #include "video.h"
 #include "libavutil/common.h"
 #include "libavutil/cpu.h"
-#include "libavutil/imgutils.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/tx.h"
@@ -382,11 +382,9 @@ static int config_props(AVFilterLink *inlink)
     if (s->depth <= 8) {
         s->rdft_horizontal = rdft_horizontal8;
         s->irdft_horizontal = irdft_horizontal8;
-    } else if (s->depth > 8) {
+    } else {
         s->rdft_horizontal = rdft_horizontal16;
         s->irdft_horizontal = irdft_horizontal16;
-    } else {
-        return AVERROR_BUG;
     }
     return 0;
 }

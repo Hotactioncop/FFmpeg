@@ -25,13 +25,14 @@
 #include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "libavcodec/ac3_parser_internal.h"
 #include "libavcodec/bytestream.h"
 #include "libavcodec/defs.h"
 #include "libavcodec/h264.h"
-#include "libavcodec/hevc.h"
+#include "libavcodec/hevc/hevc.h"
 #include "libavcodec/vvc.h"
 #include "libavcodec/startcode.h"
 
@@ -2319,7 +2320,7 @@ static int mpegts_check_bitstream(AVFormatContext *s, AVStream *st,
                 pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
                 (AV_RB24(pkt->data) != 0x000001 ||
                     (st->codecpar->extradata_size > 0 &&
-                        (st->codecpar->extradata[0] & e->mask == e->value))))
+                        ((st->codecpar->extradata[0] & e->mask) == e->value))))
             return ff_stream_add_bitstream_filter(st, e->bsf_name, NULL);
     }
     return 1;
@@ -2415,6 +2416,6 @@ const FFOutputFormat ff_mpegts_muxer = {
 #else
     .p.flags         = AVFMT_VARIABLE_FPS | AVFMT_NODIMENSIONS,
 #endif
-    .flags_internal  = FF_FMT_ALLOW_FLUSH,
+    .flags_internal  = FF_OFMT_FLAG_ALLOW_FLUSH,
     .p.priv_class   = &mpegts_muxer_class,
 };

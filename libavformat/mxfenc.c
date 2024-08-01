@@ -40,6 +40,7 @@
 #include <inttypes.h>
 #include <time.h>
 
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/timecode.h"
@@ -59,6 +60,7 @@
 #include "avio_internal.h"
 #include "internal.h"
 #include "avc.h"
+#include "nal.h"
 #include "mux.h"
 #include "mxf.h"
 #include "config.h"
@@ -2476,7 +2478,7 @@ static int mxf_parse_h264_frame(AVFormatContext *s, AVStream *st,
             if (mxf->header_written)
                 break;
 
-            nal_end = ff_avc_find_startcode(buf, buf_end);
+            nal_end = ff_nal_find_startcode(buf, buf_end);
             ret = ff_avc_decode_sps(sps, buf, nal_end - buf);
             if (ret < 0) {
                 av_log(s, AV_LOG_ERROR, "error parsing sps\n");
@@ -2605,9 +2607,6 @@ static int mxf_parse_ffv1_frame(AVFormatContext *s, AVStream *st, AVPacket *pkt)
         ff_build_rac_states(&c, 0.05 * (1LL << 32), 256 - 8);
         v = get_ffv1_unsigned_symbol(&c, state);
         av_assert0(v >= 2);
-        if (v > 4) {
-            return 0;
-        }
         if (v > 4) {
             av_log(s, AV_LOG_ERROR, "unsupported ffv1 version %d\n", v);
             return 0;
@@ -3542,6 +3541,16 @@ static int mxf_interleave(AVFormatContext *s, AVPacket *pkt,
     return mxf_interleave_get_packet(s, pkt, flush);
 }
 
+static int mxf_check_bitstream(AVFormatContext *s, AVStream *st, const AVPacket *pkt)
+{
+    if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
+        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
+                              AV_RB24(pkt->data) != 0x000001)
+            return ff_stream_add_bitstream_filter(st, "h264_mp4toannexb", NULL);
+    }
+    return 1;
+}
+
 #define MXF_COMMON_OPTIONS \
     { "signal_standard", "Force/set Signal Standard",\
       offsetof(MXFContext, signal_standard), AV_OPT_TYPE_INT, {.i64 = -1}, -1, 7, AV_OPT_FLAG_ENCODING_PARAM, .unit = "signal_standard"},\
@@ -3623,6 +3632,7 @@ const FFOutputFormat ff_mxf_muxer = {
     .p.flags           = AVFMT_NOTIMESTAMPS,
     .interleave_packet = mxf_interleave,
     .p.priv_class      = &mxf_muxer_class,
+    .check_bitstream   = mxf_check_bitstream,
 };
 
 const FFOutputFormat ff_mxf_d10_muxer = {
@@ -3656,4 +3666,5 @@ const FFOutputFormat ff_mxf_opatom_muxer = {
     .p.flags           = AVFMT_NOTIMESTAMPS,
     .interleave_packet = mxf_interleave,
     .p.priv_class      = &mxf_opatom_muxer_class,
+    .check_bitstream   = mxf_check_bitstream,
 };

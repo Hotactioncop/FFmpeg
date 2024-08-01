@@ -25,6 +25,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "libavutil/attributes_internal.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/iamf.h"
 #include "libavcodec/codec_id.h"
@@ -67,7 +68,7 @@ typedef struct IAMFCodecConfig {
     enum AVCodecID codec_id;
     uint32_t codec_tag;
     unsigned nb_samples;
-    int seek_preroll;
+    int audio_roll_distance;
     int sample_rate;
     int extradata_size;
     uint8_t *extradata;
@@ -162,6 +163,7 @@ struct IAMFSoundSystemMap {
     AVChannelLayout layout;
 };
 
+FF_VISIBILITY_PUSH_HIDDEN
 extern const AVChannelLayout ff_iamf_scalable_ch_layouts[10];
 extern const struct IAMFSoundSystemMap ff_iamf_sound_system_map[13];
 
@@ -195,5 +197,6 @@ static inline IAMFParamDefinition *ff_iamf_get_param_definition(const IAMFContex
 void ff_iamf_free_audio_element(IAMFAudioElement **paudio_element);
 void ff_iamf_free_mix_presentation(IAMFMixPresentation **pmix_presentation);
 void ff_iamf_uninit_context(IAMFContext *c);
+FF_VISIBILITY_POP_HIDDEN
 
 #endif /* AVFORMAT_IAMF_H */

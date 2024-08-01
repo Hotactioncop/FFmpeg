@@ -22,6 +22,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/log.h"
+#include "libavutil/mem.h"
 #include "libavcodec/mathops.h"
 #include "libavcodec/packet.h"
 #include "avformat.h"
@@ -275,7 +276,8 @@ int ff_iamf_read_packet(AVFormatContext *s, IAMFDemuxContext *c,
         unsigned skip_samples, discard_padding;
         int ret, len, size, start_pos;
 
-        if ((ret = ffio_ensure_seekback(pb, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size))) < 0)
+        ret = ffio_ensure_seekback(pb, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size));
+        if (ret < 0)
             return ret;
         size = avio_read(pb, header, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size));
         if (size < 0)
@@ -283,9 +285,9 @@ int ff_iamf_read_packet(AVFormatContext *s, IAMFDemuxContext *c,
 
         len = ff_iamf_parse_obu_header(header, size, &obu_size, &start_pos, &type,
                                        &skip_samples, &discard_padding);
-        if (len < 0 || obu_size > max_size) {
+        if (len < 0 || obu_size > max_size || len > INT_MAX - read) {
             av_log(s, AV_LOG_ERROR, "Failed to read obu\n");
-            return len;
+            return len < 0 ? len : AVERROR_INVALIDDATA;
         }
         avio_seek(pb, -(size - start_pos), SEEK_CUR);
 
@@ -310,10 +312,8 @@ int ff_iamf_read_packet(AVFormatContext *s, IAMFDemuxContext *c,
             c->recon_size = 0;
         } else {
             int64_t offset = avio_skip(pb, obu_size);
-            if (offset < 0) {
-                ret = offset;
-                break;
-            }
+            if (offset < 0)
+                return offset;
         }
         max_size -= len;
         if (max_size < 0)

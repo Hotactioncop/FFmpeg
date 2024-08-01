@@ -1414,7 +1414,8 @@ static int estimate_coeff(MLPEncodeContext *ctx, MLPSubstream *s,
     int32_t maxl = INT32_MIN, maxr = INT32_MIN, minl = INT32_MAX, minr = INT32_MAX;
     int64_t summ = 0, sums = 0, suml = 0, sumr = 0, enl = 0, enr = 0;
     const int shift = 14 - ctx->rematrix_precision;
-    int32_t cf0, cf1, e[4], d[4], ml, mr;
+    int32_t cf0, cf1, e[4], d[4];
+    int64_t ml, mr;
     int i, count = 0;
 
     for (int j = 0; j <= ctx->cur_restart_interval; j++) {
@@ -1447,8 +1448,8 @@ static int estimate_coeff(MLPEncodeContext *ctx, MLPSubstream *s,
     summ -= FFABS(suml + sumr);
     sums -= FFABS(suml - sumr);
 
-    ml = maxl - minl;
-    mr = maxr - minr;
+    ml = maxl - (int64_t)minl;
+    mr = maxr - (int64_t)minr;
 
     if (!summ && !sums)
         return 0;
@@ -2309,7 +2310,6 @@ const FFCodec ff_mlp_encoder = {
     .p.priv_class           = &mlp_class,
     .p.sample_fmts          = (const enum AVSampleFormat[]) {AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_S32P, AV_SAMPLE_FMT_NONE},
     .p.supported_samplerates = (const int[]) {44100, 48000, 88200, 96000, 176400, 192000, 0},
-    CODEC_OLD_CHANNEL_LAYOUTS_ARRAY(ff_mlp_channel_layouts)
     .p.ch_layouts           = ff_mlp_ch_layouts,
     .caps_internal          = FF_CODEC_CAP_INIT_CLEANUP,
 };
@@ -2330,7 +2330,6 @@ const FFCodec ff_truehd_encoder = {
     .p.priv_class           = &mlp_class,
     .p.sample_fmts          = (const enum AVSampleFormat[]) {AV_SAMPLE_FMT_S16P, AV_SAMPLE_FMT_S32P, AV_SAMPLE_FMT_NONE},
     .p.supported_samplerates = (const int[]) {44100, 48000, 88200, 96000, 176400, 192000, 0},
-    CODEC_OLD_CHANNEL_LAYOUTS(AV_CH_LAYOUT_MONO, AV_CH_LAYOUT_STEREO, AV_CH_LAYOUT_2POINT1, AV_CH_LAYOUT_SURROUND, AV_CH_LAYOUT_3POINT1, AV_CH_LAYOUT_4POINT0, AV_CH_LAYOUT_4POINT1, AV_CH_LAYOUT_5POINT0, AV_CH_LAYOUT_5POINT1)
     .p.ch_layouts           = (const AVChannelLayout[]) {
                                   AV_CHANNEL_LAYOUT_MONO,
                                   AV_CHANNEL_LAYOUT_STEREO,

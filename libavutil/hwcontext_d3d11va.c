@@ -36,6 +36,7 @@
 #include "hwcontext_d3d11va.h"
 #include "hwcontext_internal.h"
 #include "imgutils.h"
+#include "mem.h"
 #include "pixdesc.h"
 #include "pixfmt.h"
 #include "thread.h"
@@ -62,7 +63,9 @@ static av_cold void load_functions(void)
         return;
 
     mD3D11CreateDevice = (PFN_D3D11_CREATE_DEVICE) GetProcAddress(d3dlib, "D3D11CreateDevice");
-    mCreateDXGIFactory = (PFN_CREATE_DXGI_FACTORY) GetProcAddress(dxgilib, "CreateDXGIFactory");
+    mCreateDXGIFactory = (PFN_CREATE_DXGI_FACTORY) GetProcAddress(dxgilib, "CreateDXGIFactory1");
+    if (!mCreateDXGIFactory)
+        mCreateDXGIFactory = (PFN_CREATE_DXGI_FACTORY) GetProcAddress(dxgilib, "CreateDXGIFactory");
 #else
     // In UWP (which lacks LoadLibrary), CreateDXGIFactory isn't available,
     // only CreateDXGIFactory1
@@ -187,6 +190,7 @@ static AVBufferRef *wrap_texture_buf(AVHWFramesContext *ctx, ID3D11Texture2D *te
                                                    sizeof(*frames_hwctx->texture_infos));
         if (!frames_hwctx->texture_infos) {
             ID3D11Texture2D_Release(tex);
+            av_free(desc);
             return NULL;
         }
         s->nb_surfaces = s->nb_surfaces_used + 1;
@@ -199,7 +203,7 @@ static AVBufferRef *wrap_texture_buf(AVHWFramesContext *ctx, ID3D11Texture2D *te
     desc->texture = tex;
     desc->index   = index;
 
-    buf = av_buffer_create((uint8_t *)desc, sizeof(desc), free_texture, tex, 0);
+    buf = av_buffer_create((uint8_t *)desc, sizeof(*desc), free_texture, tex, 0);
     if (!buf) {
         ID3D11Texture2D_Release(tex);
         av_free(desc);
@@ -319,9 +323,10 @@ static int d3d11va_frames_init(AVHWFramesContext *ctx)
         return AVERROR(ENOMEM);
     s->nb_surfaces = ctx->initial_pool_size;
 
-    ctx->internal->pool_internal = av_buffer_pool_init2(sizeof(AVD3D11FrameDescriptor),
-                                                        ctx, d3d11va_pool_alloc, NULL);
-    if (!ctx->internal->pool_internal)
+    ffhwframesctx(ctx)->pool_internal =
+        av_buffer_pool_init2(sizeof(AVD3D11FrameDescriptor),
+                             ctx, d3d11va_pool_alloc, NULL);
+    if (!ffhwframesctx(ctx)->pool_internal)
         return AVERROR(ENOMEM);
 
     return 0;
@@ -611,14 +616,10 @@ static int d3d11va_device_create(AVHWDeviceContext *ctx, const char *device,
     int ret;
     int adapter = -1;
 
-    // (On UWP we can't check this.)
-#if !HAVE_UWP
-    if (!LoadLibrary("d3d11_1sdklayers.dll"))
-        is_debug = 0;
-#endif
-
-    if (is_debug)
+    if (is_debug) {
         creationFlags |= D3D11_CREATE_DEVICE_DEBUG;
+        av_log(ctx, AV_LOG_INFO, "Enabling d3d11 debugging.\n");
+    }
 
     if ((ret = ff_thread_once(&functions_loaded, load_functions)) != 0)
         return AVERROR_UNKNOWN;
@@ -686,9 +687,17 @@ static int d3d11va_device_create(AVHWDeviceContext *ctx, const char *device,
             if (pf_DXGIGetDebugInterface) {
                 IDXGIDebug *dxgi_debug = NULL;
                 hr = pf_DXGIGetDebugInterface(&IID_IDXGIDebug, (void**)&dxgi_debug);
-                if (SUCCEEDED(hr) && dxgi_debug)
+                if (SUCCEEDED(hr) && dxgi_debug) {
                     IDXGIDebug_ReportLiveObjects(dxgi_debug, DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+                    av_log(ctx, AV_LOG_INFO, "Enabled dxgi debugging.\n");
+                } else {
+                    av_log(ctx, AV_LOG_WARNING, "Failed enabling dxgi debugging.\n");
+                }
+            } else {
+                av_log(ctx, AV_LOG_WARNING, "Failed getting dxgi debug interface.\n");
             }
+        } else {
+            av_log(ctx, AV_LOG_WARNING, "Failed loading dxgi debug library.\n");
         }
     }
 #endif

@@ -16,10 +16,10 @@ fate-ffmpeg-filter_colorkey: CMD = framecrc -auto_conversion_filters -idct simpl
 FATE_FFMPEG-$(call FILTERFRAMECRC, COLOR) += fate-ffmpeg-lavfi
 fate-ffmpeg-lavfi: CMD = framecrc -lavfi color=d=1:r=5 -fflags +bitexact
 
-FATE_SAMPLES_FFMPEG-$(call ENCDEC2, MPEG4, RAWVIDEO, AVI, RAWVIDEO_DEMUXER FRAMECRC_MUXER) += fate-force_key_frames
-fate-force_key_frames: tests/data/vsynth_lena.yuv
+FATE_FFMPEG-$(call ENCDEC2, MPEG4, RAWVIDEO, AVI, RAWVIDEO_DEMUXER FRAMECRC_MUXER) += fate-force_key_frames
+fate-force_key_frames: tests/data/vsynth1.yuv
 fate-force_key_frames: CMD = enc_dec \
-  "rawvideo -s 352x288 -pix_fmt yuv420p" tests/data/vsynth_lena.yuv \
+  "rawvideo -s 352x288 -pix_fmt yuv420p" tests/data/vsynth1.yuv    \
   avi "-c mpeg4 -g 240 -qscale 10 -force_key_frames 0.5,0:00:01.5" \
   framecrc "" "-skip_frame nokey"
 
@@ -62,6 +62,7 @@ fate-sub2video: CMD = framecrc -auto_conversion_filters \
 FATE_SAMPLES_FFMPEG-$(call FRAMECRC, VOBSUB, DVDSUB, SCALE_FILTER) += fate-sub2video_basic
 fate-sub2video_basic: CMD = framecrc -auto_conversion_filters \
   -i $(TARGET_SAMPLES)/sub/vobsub.idx \
+  -pix_fmt bgra \
   -fps_mode passthrough -copyts \
   -filter_complex "sws_flags=+accurate_rnd+bitexact\;[0:s:0]scale" \
   -c:v rawvideo -threads 1
@@ -71,6 +72,7 @@ fate-sub2video_basic: CMD = framecrc -auto_conversion_filters \
 FATE_SAMPLES_FFMPEG-$(call FRAMECRC, SUP, PGSSUB, SCALE_FILTER RAWVIDEO_ENCODER) += fate-sub2video_time_limited
 fate-sub2video_time_limited: CMD = framecrc -auto_conversion_filters \
   -i $(TARGET_SAMPLES)/sub/pgs_sub.sup \
+  -pix_fmt bgra \
   -fps_mode passthrough -copyts \
   -t 15 \
   -filter_complex "sws_flags=+accurate_rnd+bitexact\;[0:s:0]scale" \
@@ -87,12 +89,12 @@ fate-unknown_layout-ac3: CMD = md5 -auto_conversion_filters \
   -guess_layout_max 0 -f s32le -ac 1 -ar 44100 -i $(TARGET_PATH)/$(AREF) \
   -f ac3 -flags +bitexact -c ac3_fixed
 
-FATE_SAMPLES_FFMPEG-$(call FILTERDEMDEC, AMIX ARESAMPLE SINE, RAWVIDEO, \
+FATE_FFMPEG-$(call FILTERDEMDEC, AMIX ARESAMPLE SINE, RAWVIDEO, \
                            PCM_S16LE RAWVIDEO, LAVFI_INDEV  \
                            MPEG4_ENCODER AC3_FIXED_ENCODER) \
                            += fate-shortest
-fate-shortest: tests/data/vsynth_lena.yuv
-fate-shortest: CMD = framecrc -auto_conversion_filters -f lavfi -i "sine=3000:d=10" -f lavfi -i "sine=1000:d=1" -sws_flags +accurate_rnd+bitexact -fflags +bitexact -flags +bitexact -idct simple -f rawvideo -s 352x288 -pix_fmt yuv420p -i $(TARGET_PATH)/tests/data/vsynth_lena.yuv -filter_complex "[0:a:0][1:a:0]amix=inputs=2[audio]" -map 2:v:0 -map "[audio]" -sws_flags +accurate_rnd+bitexact -fflags +bitexact -flags +bitexact -idct simple -dct fastint -qscale 10 -threads 1 -c:v mpeg4 -c:a ac3_fixed -shortest
+fate-shortest: tests/data/vsynth1.yuv
+fate-shortest: CMD = framecrc -auto_conversion_filters -f lavfi -i "sine=3000:d=10" -f lavfi -i "sine=1000:d=1" -sws_flags +accurate_rnd+bitexact -fflags +bitexact -flags +bitexact -idct simple -f rawvideo -s 352x288 -pix_fmt yuv420p -i $(TARGET_PATH)/tests/data/vsynth1.yuv -filter_complex "[0:a:0][1:a:0]amix=inputs=2[audio]" -map 2:v:0 -map "[audio]" -sws_flags +accurate_rnd+bitexact -fflags +bitexact -flags +bitexact -idct simple -dct fastint -qscale 10 -threads 1 -c:v mpeg4 -c:a ac3_fixed -shortest
 
 # test interleaving video with a sparse subtitle stream
 FATE_SAMPLES_FFMPEG-$(call ALLYES, COLOR_FILTER, VOBSUB_DEMUXER, MATROSKA_DEMUXER,, \
@@ -129,7 +131,7 @@ fate-ffmpeg-fix_sub_duration_heartbeat: CMD = fmtstdout srt -fix_sub_duration \
 
 # FIXME: the integer AAC decoder does not produce the same output on all platforms
 # so until that is fixed we use the volume filter to silence the data
-FATE_SAMPLES_FFMPEG-$(call FRAMECRC, MATROSKA, H264 AAC_FIXED, PCM_S32LE_ENCODER VOLUME_FILTER) += fate-ffmpeg-streamloop-transcode-av
+FATE_SAMPLES_FFMPEG-$(call FRAMECRC, MATROSKA, H264 AAC_FIXED, PCM_S32LE_ENCODER VOLUME_FILTER ARESAMPLE_FILTER) += fate-ffmpeg-streamloop-transcode-av
 fate-ffmpeg-streamloop-transcode-av: CMD = \
     framecrc -auto_conversion_filters -stream_loop 3 -c:a aac_fixed -i $(TARGET_SAMPLES)/mkv/1242-small.mkv \
     -af volume=0:precision=fixed -c:a pcm_s32le
@@ -144,7 +146,7 @@ fate-copy-trac236: CMD = transcode mov $(TARGET_SAMPLES)/mov/fcp_export8-236.mov
 
 FATE_STREAMCOPY-$(call TRANSCODE, RAWVIDEO MPEG2VIDEO, MXF, MPEGTS_DEMUXER MPEGVIDEO_PARSER MPEGAUDIO_PARSER MP2_DECODER ARESAMPLE_FILTER PCM_S16LE_DECODER) += fate-copy-trac4914
 fate-copy-trac4914: CMD = transcode mpegts $(TARGET_SAMPLES)/mpeg2/xdcam8mp2-1s_small.ts\
-                      mxf "-c:a pcm_s16le -af aresample -c:v copy"
+                      mxf "-c:a pcm_s16le -af aresample -c:v copy -time_base 1001/30000"
 
 FATE_STREAMCOPY-$(call TRANSCODE, RAWVIDEO MPEG2VIDEO, AVI, MPEGTS_DEMUXER MPEGVIDEO_PARSER MPEGAUDIO_PARSER EXTRACT_EXTRADATA_BSF MP2_DECODER ARESAMPLE_FILTER) += fate-copy-trac4914-avi
 fate-copy-trac4914-avi: CMD = transcode mpegts $(TARGET_SAMPLES)/mpeg2/xdcam8mp2-1s_small.ts\
@@ -240,17 +242,24 @@ FATE_SAMPLES_FFMPEG-$(call FRAMECRC, MOV, , SETTS_BSF) += fate-ffmpeg-bsf-input
 # Test behaviour when a complex filtergraph returns EOF on one of its inputs,
 # but other inputs are still active.
 # cf. #10803
-fate-ffmpeg-filter-in-eof: tests/data/vsynth_lena.yuv
-fate-ffmpeg-filter-in-eof: CMD = framecrc                                                      \
-    -f rawvideo -s 352x288 -pix_fmt yuv420p -t 1 -i $(TARGET_PATH)/tests/data/vsynth_lena.yuv  \
-    -f rawvideo -s 352x288 -pix_fmt yuv420p -t 1 -i $(TARGET_PATH)/tests/data/vsynth_lena.yuv  \
+fate-ffmpeg-filter-in-eof: tests/data/vsynth1.yuv
+fate-ffmpeg-filter-in-eof: CMD = framecrc                                                  \
+    -f rawvideo -s 352x288 -pix_fmt yuv420p -t 1 -i $(TARGET_PATH)/tests/data/vsynth1.yuv  \
+    -f rawvideo -s 352x288 -pix_fmt yuv420p -t 1 -i $(TARGET_PATH)/tests/data/vsynth1.yuv  \
     -filter_complex "[0][1]concat" -c:v rawvideo
 FATE_FFMPEG-$(call FRAMECRC, RAWVIDEO, RAWVIDEO, CONCAT_FILTER) += fate-ffmpeg-filter-in-eof
 
 # Test termination on streamcopy with -t as an output option.
-fate-ffmpeg-streamcopy-t: tests/data/vsynth_lena.yuv
+fate-ffmpeg-streamcopy-t: tests/data/vsynth1.yuv
 fate-ffmpeg-streamcopy-t: CMP = null
-fate-ffmpeg-streamcopy-t: CMD = ffmpeg                                                                    \
-    -stream_loop -1 -f rawvideo -s 352x288 -pix_fmt yuv420p -i $(TARGET_PATH)/tests/data/vsynth_lena.yuv  \
+fate-ffmpeg-streamcopy-t: CMD = ffmpeg                                                                \
+    -stream_loop -1 -f rawvideo -s 352x288 -pix_fmt yuv420p -i $(TARGET_PATH)/tests/data/vsynth1.yuv  \
     -c copy -f null -t 1 -
 FATE_FFMPEG-$(call REMUX, RAWVIDEO) += fate-ffmpeg-streamcopy-t
+
+# Test loopback decoding and passing the output to a complex graph.
+fate-ffmpeg-loopback-decoding: tests/data/vsynth1.yuv
+fate-ffmpeg-loopback-decoding: CMD = transcode \
+    "rawvideo -s 352x288 -pix_fmt yuv420p" $(TARGET_PATH)/tests/data/vsynth1.yuv nut \
+    "-map 0:v:0 -c:v mpeg2video -f null - -flags +bitexact -idct simple -threads $$threads -dec 0:0 -filter_complex '[0:v][dec:0]hstack[stack]' -map '[stack]' -c:v ffv1" ""
+FATE_FFMPEG-$(call ENCDEC2, MPEG2VIDEO, FFV1, NUT, HSTACK_FILTER PIPE_PROTOCOL FRAMECRC_MUXER) += fate-ffmpeg-loopback-decoding

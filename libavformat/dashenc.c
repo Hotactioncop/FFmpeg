@@ -33,6 +33,7 @@
 #include "libavutil/bprint.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
 #include "libavutil/rational.h"
@@ -1321,7 +1322,7 @@ static int write_manifest(AVFormatContext *s, int final)
                     av_strlcat(codec_str, audio_codec_str, sizeof(codec_str));
                 }
                 get_hls_playlist_name(playlist_file, sizeof(playlist_file), NULL, i);
-                ff_hls_write_stream_info(st, c->m3u8_out, stream_bitrate,
+                ff_hls_write_stream_info(st, c->m3u8_out, stream_bitrate, 0,
                                          playlist_file, agroup,
                                          codec_str, NULL, NULL);
             }
@@ -1347,7 +1348,7 @@ static int write_manifest(AVFormatContext *s, int final)
                     continue;
                 av_strlcpy(codec_str, os->codec_str, sizeof(codec_str));
                 get_hls_playlist_name(playlist_file, sizeof(playlist_file), NULL, i);
-                ff_hls_write_stream_info(st, c->m3u8_out, stream_bitrate,
+                ff_hls_write_stream_info(st, c->m3u8_out, stream_bitrate, 0,
                                          playlist_file, NULL,
                                          codec_str, NULL, NULL);
             }
@@ -1544,11 +1545,6 @@ static int dash_init(AVFormatContext *s)
             return AVERROR_MUXER_NOT_FOUND;
         ctx->interrupt_callback    = s->interrupt_callback;
         ctx->opaque                = s->opaque;
-#if FF_API_AVFORMAT_IO_CLOSE
-FF_DISABLE_DEPRECATION_WARNINGS
-        ctx->io_close              = s->io_close;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
         ctx->io_close2             = s->io_close2;
         ctx->io_open               = s->io_open;
         ctx->strict_std_compliance = s->strict_std_compliance;

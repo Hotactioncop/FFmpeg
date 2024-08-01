@@ -21,6 +21,7 @@
 #include "libavutil/riscv/asm.S"
 
 func ff_rv34_inv_transform_dc_rvv, zve32x
+        lpad    0
         lh            t1, 0(a0)
         li            t0, 13 * 13 * 3
         mul           t2, t0, t1
@@ -33,11 +34,11 @@ func ff_rv34_inv_transform_dc_rvv, zve32x
 endfunc
 
 func ff_rv34_idct_dc_add_rvv, zve32x
+        lpad    0
         vsetivli      zero, 4, e8, mf4, ta, ma
         vlse32.v      v0, (a0), a1
         li            t1, 169
         mul           t1, t1, a2
-        li            a2, 255
         addi          t1, t1, 512
         srai          t1, t1, 10
         vsetivli      zero, 4*4, e16, m2, ta, ma

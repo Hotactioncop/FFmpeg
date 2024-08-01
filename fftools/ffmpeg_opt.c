@@ -31,7 +31,6 @@
 #include "ffmpeg_sched.h"
 #include "cmdutils.h"
 #include "opt_common.h"
-#include "sync_queue.h"
 
 #include "libavformat/avformat.h"
 
@@ -43,16 +42,10 @@
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/avutil.h"
-#include "libavutil/bprint.h"
-#include "libavutil/channel_layout.h"
-#include "libavutil/display.h"
-#include "libavutil/intreadwrite.h"
-#include "libavutil/fifo.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
-#include "libavutil/pixdesc.h"
-#include "libavutil/pixfmt.h"
 
 HWDevice *filter_hw_device;
 
@@ -94,13 +87,16 @@ int recast_media = 0;
 
 static void uninit_options(OptionsContext *o)
 {
-    const OptionDef *po = options;
     int i;
 
     /* all OPT_SPEC and OPT_TYPE_STRING can be freed in generic way */
-    while (po->name) {
-        void *dst = (uint8_t*)o + po->u.off;
+    for (const OptionDef *po = options; po->name; po++) {
+        void *dst;
 
+        if (!(po->flags & OPT_FLAG_OFFSET))
+            continue;
+
+        dst = (uint8_t*)o + po->u.off;
         if (po->flags & OPT_FLAG_SPEC) {
             SpecifierOptList *so = dst;
             for (int i = 0; i < so->nb_opt; i++) {
@@ -110,9 +106,8 @@ static void uninit_options(OptionsContext *o)
             }
             av_freep(&so->opt);
             so->nb_opt = 0;
-        } else if (po->flags & OPT_FLAG_OFFSET && po->type == OPT_TYPE_STRING)
+        } else if (po->type == OPT_TYPE_STRING)
             av_freep(dst);
-        po++;
     }
 
     for (i = 0; i < o->nb_stream_maps; i++)
@@ -154,24 +149,6 @@ static int show_hwaccels(void *optctx, const char *opt, const char *arg)
         printf("%s\n", av_hwdevice_get_type_name(type));
     printf("\n");
     return 0;
-}
-
-/* return a copy of the input with the stream specifiers removed from the keys */
-AVDictionary *strip_specifiers(const AVDictionary *dict)
-{
-    const AVDictionaryEntry *e = NULL;
-    AVDictionary    *ret = NULL;
-
-    while ((e = av_dict_iterate(dict, e))) {
-        char *p = strchr(e->key, ':');
-
-        if (p)
-            *p = 0;
-        av_dict_set(&ret, e->key, e->value, 0);
-        if (p)
-            *p = ':';
-    }
-    return ret;
 }
 
 const char *opt_match_per_type_str(const SpecifierOptList *sol,
@@ -322,7 +299,7 @@ static int opt_filter_threads(void *optctx, const char *opt, const char *arg)
 static int opt_abort_on(void *optctx, const char *opt, const char *arg)
 {
     static const AVOption opts[] = {
-        { "abort_on"           , NULL, 0, AV_OPT_TYPE_FLAGS, { .i64 = 0 }, INT64_MIN, INT64_MAX,           .unit = "flags" },
+        { "abort_on"           , NULL, 0, AV_OPT_TYPE_FLAGS, { .i64 = 0 }, INT64_MIN, (double)INT64_MAX,   .unit = "flags" },
         { "empty_output"       , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = ABORT_ON_FLAG_EMPTY_OUTPUT        }, .unit = "flags" },
         { "empty_output_stream", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = ABORT_ON_FLAG_EMPTY_OUTPUT_STREAM }, .unit = "flags" },
         { NULL },
@@ -672,18 +649,6 @@ static int opt_streamid(void *optctx, const char *opt, const char *arg)
     *p++ = '\0';
 
     return av_dict_set(&o->streamid, idx_str, p, 0);
-}
-
-static int init_complex_filters(void)
-{
-    int i, ret = 0;
-
-    for (i = 0; i < nb_filtergraphs; i++) {
-        ret = init_complex_filtergraph(filtergraphs[i]);
-        if (ret < 0)
-            return ret;
-    }
-    return 0;
 }
 
 static int opt_target(void *optctx, const char *opt, const char *arg)
@@ -1189,11 +1154,13 @@ void show_usage(void)
 enum OptGroup {
     GROUP_OUTFILE,
     GROUP_INFILE,
+    GROUP_DECODER,
 };
 
 static const OptionGroupDef groups[] = {
     [GROUP_OUTFILE] = { "output url",  NULL, OPT_OUTPUT },
     [GROUP_INFILE]  = { "input url",   "i",  OPT_INPUT },
+    [GROUP_DECODER] = { "loopback decoder", "dec", OPT_DECODER },
 };
 
 static int open_files(OptionGroupList *l, const char *inout, Scheduler *sch,
@@ -1264,13 +1231,6 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
     }
 
-    /* create the complex filtergraphs */
-    ret = init_complex_filters();
-    if (ret < 0) {
-        errmsg = "initializing complex filters";
-        goto fail;
-    }
-
     /* open output files */
     ret = open_files(&octx.groups[GROUP_OUTFILE], "output", sch, of_open);
     if (ret < 0) {
@@ -1278,13 +1238,23 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
     }
 
+    /* create loopback decoders */
+    ret = open_files(&octx.groups[GROUP_DECODER], "decoder", sch, dec_create);
+    if (ret < 0) {
+        errmsg = "creating loopback decoders";
+        goto fail;
+    }
+
+    // bind unbound filtegraph inputs/outputs and check consistency
+    ret = fg_finalise_bindings();
+    if (ret < 0) {
+        errmsg = "binding filtergraph inputs/outputs";
+        goto fail;
+    }
+
     correct_input_start_times();
 
     ret = apply_sync_offsets();
-    if (ret < 0)
-        goto fail;
-
-    ret = check_filter_outputs();
     if (ret < 0)
         goto fail;
 
@@ -1381,11 +1351,11 @@ const OptionDef options[] = {
     { "recast_media",           OPT_TYPE_BOOL, OPT_EXPERT,
         {              &recast_media },
         "allow recasting stream type in order to force a decoder of different media type" },
-    { "c",                      OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_HAS_CANON,
+    { "c",                      OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_DECODER | OPT_HAS_CANON,
         { .off       = OFFSET(codec_names) },
         "select encoder/decoder ('copy' to copy stream without reencoding)", "codec",
         .u1.name_canon = "codec", },
-    { "codec",                  OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_EXPERT | OPT_HAS_ALT,
+    { "codec",                  OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_DECODER | OPT_EXPERT | OPT_HAS_ALT,
         { .off       = OFFSET(codec_names) },
         "alias for -c (select encoder/decoder)", "codec",
         .u1.names_alt = alt_codec, },
@@ -1507,9 +1477,6 @@ const OptionDef options[] = {
     { "bitexact",               OPT_TYPE_BOOL, OPT_EXPERT | OPT_OFFSET | OPT_OUTPUT | OPT_INPUT,
         { .off = OFFSET(bitexact) },
         "bitexact mode" },
-    { "apad",                   OPT_TYPE_STRING, OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
-        { .off = OFFSET(apad) },
-        "audio pad", "" },
     { "dts_delta_threshold",    OPT_TYPE_FLOAT, OPT_EXPERT,
         { &dts_delta_threshold },
         "timestamp discontinuity delta threshold", "threshold" },
@@ -1738,12 +1705,15 @@ const OptionDef options[] = {
     { "hwaccels",                   OPT_TYPE_FUNC,   OPT_EXIT | OPT_EXPERT,
         { .func_arg = show_hwaccels },
         "show available HW acceleration methods" },
-    { "autorotate",                 OPT_TYPE_BOOL,   OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
+    { "autorotate",                 OPT_TYPE_BOOL,   OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
         { .off = OFFSET(autorotate) },
         "automatically insert correct rotate filters" },
-    { "autoscale",                  OPT_TYPE_BOOL,   OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
+    { "autoscale",                  OPT_TYPE_BOOL,   OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
         { .off = OFFSET(autoscale) },
         "automatically insert a scale filter at the end of the filter graph" },
+    { "apply_cropping",             OPT_TYPE_STRING, OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
+        { .off = OFFSET(apply_cropping) },
+        "select the cropping to apply" },
     { "fix_sub_duration_heartbeat", OPT_TYPE_BOOL,   OPT_VIDEO | OPT_EXPERT | OPT_PERSTREAM | OPT_OUTPUT,
         { .off = OFFSET(fix_sub_duration_heartbeat) },
         "set this video output stream to be a heartbeat stream for "
@@ -1774,6 +1744,9 @@ const OptionDef options[] = {
     { "ab",               OPT_TYPE_FUNC,    OPT_AUDIO | OPT_FUNC_ARG | OPT_PERFILE | OPT_OUTPUT,
         { .func_arg = opt_bitrate },
         "alias for -b:a (select bitrate for audio streams)", "bitrate" },
+    { "apad",             OPT_TYPE_STRING,  OPT_AUDIO | OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
+        { .off = OFFSET(apad) },
+        "audio pad", "" },
     { "atag",             OPT_TYPE_FUNC,    OPT_AUDIO | OPT_FUNC_ARG  | OPT_EXPERT | OPT_PERFILE | OPT_OUTPUT | OPT_HAS_CANON,
         { .func_arg = opt_old2new },
         "force audio tag/fourcc", "fourcc/tag",

@@ -24,6 +24,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -760,8 +761,10 @@ static int param_init(AVFilterContext *ctx)
             s->rdiv[i] = s->scale;
             s->bias[i] = s->delta;
         }
+#if CONFIG_SOBEL_FILTER
     } else if (!strcmp(ctx->filter->name, "sobel")) {
         ff_sobel_init(s, s->depth, s->nb_planes);
+#endif
     } else if (!strcmp(ctx->filter->name, "kirsch")) {
         for (i = 0; i < 4; i++) {
             s->filter[i] = filter_kirsch;

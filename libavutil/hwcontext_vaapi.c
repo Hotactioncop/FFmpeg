@@ -633,10 +633,10 @@ static int vaapi_frames_init(AVHWFramesContext *hwfc)
             avfc->surface_ids = NULL;
         }
 
-        hwfc->internal->pool_internal =
+        ffhwframesctx(hwfc)->pool_internal =
             av_buffer_pool_init2(sizeof(VASurfaceID), hwfc,
                                  &vaapi_pool_alloc, NULL);
-        if (!hwfc->internal->pool_internal) {
+        if (!ffhwframesctx(hwfc)->pool_internal) {
             av_log(hwfc, AV_LOG_ERROR, "Failed to create VAAPI surface pool.\n");
             err = AVERROR(ENOMEM);
             goto fail;
@@ -654,7 +654,7 @@ static int vaapi_frames_init(AVHWFramesContext *hwfc)
             goto fail;
         }
     } else {
-        test_surface = av_buffer_pool_get(hwfc->internal->pool_internal);
+        test_surface = av_buffer_pool_get(ffhwframesctx(hwfc)->pool_internal);
         if (!test_surface) {
             av_log(hwfc, AV_LOG_ERROR, "Unable to allocate a surface from "
                    "internal buffer pool.\n");
@@ -809,6 +809,9 @@ static int vaapi_map_frame(AVHWFramesContext *hwfc,
     VAStatus vas;
     void *address = NULL;
     int err, i;
+#if VA_CHECK_VERSION(1, 21, 0)
+    uint32_t vaflags = 0;
+#endif
 
     surface_id = (VASurfaceID)(uintptr_t)src->data[3];
     av_log(hwfc, AV_LOG_DEBUG, "Map surface %#x.\n", surface_id);
@@ -892,7 +895,16 @@ static int vaapi_map_frame(AVHWFramesContext *hwfc,
         }
     }
 
+#if VA_CHECK_VERSION(1, 21, 0)
+    if (flags & AV_HWFRAME_MAP_READ)
+        vaflags |= VA_MAPBUFFER_FLAG_READ;
+    if (flags & AV_HWFRAME_MAP_WRITE)
+        vaflags |= VA_MAPBUFFER_FLAG_WRITE;
+    // On drivers not implementing vaMapBuffer2 libva calls vaMapBuffer instead.
+    vas = vaMapBuffer2(hwctx->display, map->image.buf, &address, vaflags);
+#else
     vas = vaMapBuffer(hwctx->display, map->image.buf, &address);
+#endif
     if (vas != VA_STATUS_SUCCESS) {
         av_log(hwfc, AV_LOG_ERROR, "Failed to map image from surface "
                "%#x: %d (%s).\n", surface_id, vas, vaErrorStr(vas));

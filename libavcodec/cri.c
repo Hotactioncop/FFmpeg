@@ -234,10 +234,14 @@ static int cri_decode_frame(AVCodecContext *avctx, AVFrame *p,
             s->data_size = length;
             goto skip;
         case 105:
+            if (length <= 0)
+                return AVERROR_INVALIDDATA;
             hflip = bytestream2_get_byte(gb) != 0;
             length--;
             goto skip;
         case 106:
+            if (length <= 0)
+                return AVERROR_INVALIDDATA;
             vflip = bytestream2_get_byte(gb) != 0;
             length--;
             goto skip;
@@ -398,16 +402,13 @@ skip:
     }
 
     if (hflip || vflip) {
-        rotation = av_frame_new_side_data(p, AV_FRAME_DATA_DISPLAYMATRIX,
-                                          sizeof(int32_t) * 9);
+        ff_frame_new_side_data(avctx, p, AV_FRAME_DATA_DISPLAYMATRIX,
+                               sizeof(int32_t) * 9, &rotation);
         if (rotation) {
             av_display_rotation_set((int32_t *)rotation->data, 0.f);
             av_display_matrix_flip((int32_t *)rotation->data, hflip, vflip);
         }
     }
-
-    p->pict_type = AV_PICTURE_TYPE_I;
-    p->flags |= AV_FRAME_FLAG_KEY;
 
     *got_frame = 1;
 

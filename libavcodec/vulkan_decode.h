@@ -37,7 +37,7 @@ typedef struct FFVulkanDecodeDescriptor {
 typedef struct FFVulkanDecodeProfileData {
     VkVideoDecodeH264ProfileInfoKHR h264_profile;
     VkVideoDecodeH265ProfileInfoKHR h265_profile;
-    VkVideoDecodeAV1ProfileInfoMESA av1_profile;
+    VkVideoDecodeAV1ProfileInfoKHR av1_profile;
     VkVideoDecodeUsageInfoKHR usage;
     VkVideoProfileInfoKHR profile;
     VkVideoProfileListInfoKHR profile_list;
@@ -71,6 +71,10 @@ typedef struct FFVulkanDecodeContext {
     int layered_dpb;   /* Madness #1 - layered  DPB images */
     int external_fg;   /* Oddity  #2 - hardware can't apply film grain */
     uint32_t frame_id_alloc_mask; /* For AV1 only */
+
+    /* Workaround for NVIDIA drivers tested with CTS version 1.3.8 for AV1.
+     * The tests were incorrect as the OrderHints were offset by 1. */
+    int quirk_av1_offset;
 
     /* Thread-local state below */
     struct HEVCHeaderSet *hevc_headers;
