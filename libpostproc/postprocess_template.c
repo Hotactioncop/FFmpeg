@@ -22,12 +22,9 @@
  * @file
  * mmx/mmx2/sse2 postprocess code.
  */
-#include "config.h"
 
 #include "libavutil/mem_internal.h"
-#if ARCH_X86
 #include "libavutil/x86/asm.h"
-#endif
 
 /* A single TEMPLATE_PP_* should be defined (to 1) when this template is
  * included. The following macros will define its dependencies to 1 as well
@@ -833,7 +830,7 @@ static inline void RENAME(doVertDefFilter)(uint8_t src[], int stride, PPContext 
 #if !TEMPLATE_PP_ALTIVEC
 static inline void RENAME(dering)(uint8_t src[], int stride, PPContext *c)
 {
-#if TEMPLATE_PP_MMXEXT && HAVE_7REGS
+#if HAVE_7REGS && TEMPLATE_PP_MMXEXT
     DECLARE_ALIGNED(8, uint64_t, tmp)[3];
     __asm__ volatile(
         "pxor %%mm6, %%mm6                      \n\t"

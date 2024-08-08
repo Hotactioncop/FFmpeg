@@ -21,9 +21,9 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/internal.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
-#include "libavutil/thread.h"
+
+#include "libavcodec/internal.h"
 
 #include "avformat.h"
 #include "demux.h"
@@ -130,8 +130,6 @@ static const int avs_planes_yuva[4]   = { AVS_PLANAR_Y, AVS_PLANAR_U,
                                           AVS_PLANAR_V, AVS_PLANAR_A };
 static const int avs_planes_rgba[4]   = { AVS_PLANAR_G, AVS_PLANAR_B,
                                           AVS_PLANAR_R, AVS_PLANAR_A };
-
-static AVMutex avisynth_mutex = AV_MUTEX_INITIALIZER;
 
 /* A conflict between C++ global objects, atexit, and dynamic loading requires
  * us to register our own atexit handler to prevent double freeing. */
@@ -1086,15 +1084,15 @@ static av_cold int avisynth_read_header(AVFormatContext *s)
     int ret;
 
     // Calling library must implement a lock for thread-safe opens.
-    if (ff_mutex_lock(&avisynth_mutex))
-        return AVERROR_UNKNOWN;
+    if (ret = ff_lock_avformat())
+        return ret;
 
     if (ret = avisynth_open_file(s)) {
-        ff_mutex_unlock(&avisynth_mutex);
+        ff_unlock_avformat();
         return ret;
     }
 
-    ff_mutex_unlock(&avisynth_mutex);
+    ff_unlock_avformat();
     return 0;
 }
 
@@ -1130,11 +1128,11 @@ static int avisynth_read_packet(AVFormatContext *s, AVPacket *pkt)
 
 static av_cold int avisynth_read_close(AVFormatContext *s)
 {
-    if (ff_mutex_lock(&avisynth_mutex))
+    if (ff_lock_avformat())
         return AVERROR_UNKNOWN;
 
     avisynth_context_destroy(s->priv_data);
-    ff_mutex_unlock(&avisynth_mutex);
+    ff_unlock_avformat();
     return 0;
 }
 

@@ -25,8 +25,7 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/dict.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
-#include "metadata.h"
+#include "riff.h"
 
 typedef struct VqfContext {
     int frame_bit_len;

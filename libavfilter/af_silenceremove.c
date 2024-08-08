@@ -24,7 +24,6 @@
 #include <float.h> /* DBL_MAX */
 
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "audio.h"
 #include "filters.h"

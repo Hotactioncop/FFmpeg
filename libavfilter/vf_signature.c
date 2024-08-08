@@ -26,7 +26,6 @@
 
 #include "libavcodec/put_bits.h"
 #include "libavformat/avformat.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/avstring.h"
 #include "libavutil/file_open.h"

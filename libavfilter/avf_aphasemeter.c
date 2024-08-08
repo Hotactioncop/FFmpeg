@@ -23,8 +23,6 @@
  * audio to video multimedia aphasemeter filter
  */
 
-#include <float.h>
-
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
@@ -36,6 +34,7 @@
 #include "audio.h"
 #include "video.h"
 #include "internal.h"
+#include "float.h"
 
 typedef struct AudioPhaseMeterContext {
     const AVClass *class;

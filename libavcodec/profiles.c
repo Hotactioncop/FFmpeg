@@ -18,8 +18,7 @@
 
 #include "config.h"
 
-#include "codec.h"
-#include "defs.h"
+#include "avcodec.h"
 #include "profiles.h"
 
 #if !CONFIG_SMALL
@@ -33,7 +32,6 @@ const AVProfile ff_aac_profiles[] = {
     { AV_PROFILE_AAC_MAIN,  "Main" },
     { AV_PROFILE_AAC_SSR,   "SSR"  },
     { AV_PROFILE_AAC_LTP,   "LTP"  },
-    { AV_PROFILE_AAC_USAC,  "xHE-AAC" },
     { AV_PROFILE_UNKNOWN },
 };
 

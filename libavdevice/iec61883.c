@@ -33,7 +33,6 @@
 #include "libavformat/demux.h"
 #include "libavformat/dv.h"
 #include "libavformat/mpegts.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "avdevice.h"
 

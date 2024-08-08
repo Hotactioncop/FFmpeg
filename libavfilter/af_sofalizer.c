@@ -28,7 +28,6 @@
 #include <math.h>
 #include <mysofa.h>
 
-#include "libavutil/mem.h"
 #include "libavutil/tx.h"
 #include "libavutil/avstring.h"
 #include "libavutil/channel_layout.h"

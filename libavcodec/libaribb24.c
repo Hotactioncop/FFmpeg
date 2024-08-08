@@ -23,7 +23,6 @@
 #include "libavcodec/ass.h"
 #include "codec_internal.h"
 #include "libavutil/log.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include <aribb24/aribb24.h>

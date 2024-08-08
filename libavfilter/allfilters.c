@@ -546,8 +546,6 @@ extern const AVFilter ff_vf_xstack_vaapi;
 extern const AVFilter ff_vf_hstack_qsv;
 extern const AVFilter ff_vf_vstack_qsv;
 extern const AVFilter ff_vf_xstack_qsv;
-extern const AVFilter ff_vf_pad_vaapi;
-extern const AVFilter ff_vf_drawbox_vaapi;
 
 extern const AVFilter ff_vsrc_allrgb;
 extern const AVFilter ff_vsrc_allyuv;
@@ -569,7 +567,6 @@ extern const AVFilter ff_vsrc_openclsrc;
 extern const AVFilter ff_vsrc_qrencodesrc;
 extern const AVFilter ff_vsrc_pal75bars;
 extern const AVFilter ff_vsrc_pal100bars;
-extern const AVFilter ff_vsrc_perlin;
 extern const AVFilter ff_vsrc_rgbtestsrc;
 extern const AVFilter ff_vsrc_sierpinski;
 extern const AVFilter ff_vsrc_smptebars;

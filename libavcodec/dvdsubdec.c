@@ -28,7 +28,6 @@
 #include "libavutil/attributes.h"
 #include "libavutil/colorspace.h"
 #include "libavutil/file_open.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/bswap.h"
 

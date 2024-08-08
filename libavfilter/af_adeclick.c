@@ -19,7 +19,6 @@
  */
 
 #include "libavutil/audio_fifo.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/tx.h"
 #include "avfilter.h"

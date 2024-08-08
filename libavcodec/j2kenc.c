@@ -72,7 +72,6 @@
 #include "jpeg2000.h"
 #include "version.h"
 #include "libavutil/common.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
 #include "libavutil/intreadwrite.h"

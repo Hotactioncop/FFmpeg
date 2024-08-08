@@ -29,7 +29,6 @@
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/time.h"
@@ -1319,8 +1318,6 @@ fail:
     return ret;
 }
 
-static int extract_extradata(FFFormatContext *si, AVStream *st, const AVPacket *pkt);
-
 static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
 {
     FFFormatContext *const si = ffformatcontext(s);
@@ -1373,16 +1370,6 @@ static int read_frame_internal(AVFormatContext *s, AVPacket *pkt)
             if (ret < 0) {
                 av_packet_unref(pkt);
                 return ret;
-            }
-
-            if (!sti->avctx->extradata) {
-                sti->extract_extradata.inited = 0;
-
-                ret = extract_extradata(si, st, pkt);
-                if (ret < 0) {
-                    av_packet_unref(pkt);
-                    return ret;
-                }
             }
 
             sti->codec_desc = avcodec_descriptor_get(sti->avctx->codec_id);
@@ -1816,9 +1803,8 @@ static void estimate_timings_from_bit_rate(AVFormatContext *ic)
                "Estimating duration from bitrate, this may be inaccurate\n");
 }
 
-#define DURATION_DEFAULT_MAX_READ_SIZE 250000LL
-#define DURATION_DEFAULT_MAX_RETRY 6
-#define DURATION_MAX_RETRY 1
+#define DURATION_MAX_READ_SIZE 250000LL
+#define DURATION_MAX_RETRY 6
 
 /* only usable for MPEG-PS streams */
 static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
@@ -1826,8 +1812,6 @@ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
     FFFormatContext *const si = ffformatcontext(ic);
     AVPacket *const pkt = si->pkt;
     int num, den, read_size, ret;
-    int64_t duration_max_read_size = ic->duration_probesize ? ic->duration_probesize >> DURATION_MAX_RETRY : DURATION_DEFAULT_MAX_READ_SIZE;
-    int duration_max_retry = ic->duration_probesize ? DURATION_MAX_RETRY : DURATION_DEFAULT_MAX_RETRY;
     int found_duration = 0;
     int is_end;
     int64_t filesize, offset, duration;
@@ -1863,7 +1847,7 @@ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
     filesize = ic->pb ? avio_size(ic->pb) : 0;
     do {
         is_end = found_duration;
-        offset = filesize - (duration_max_read_size << retry);
+        offset = filesize - (DURATION_MAX_READ_SIZE << retry);
         if (offset < 0)
             offset = 0;
 
@@ -1872,7 +1856,7 @@ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
         for (;;) {
             AVStream *st;
             FFStream *sti;
-            if (read_size >= duration_max_read_size << (FFMAX(retry - 1, 0)))
+            if (read_size >= DURATION_MAX_READ_SIZE << (FFMAX(retry - 1, 0)))
                 break;
 
             do {
@@ -1926,7 +1910,7 @@ static void estimate_timings_from_pts(AVFormatContext *ic, int64_t old_offset)
         }
     } while (!is_end &&
              offset &&
-             ++retry <= duration_max_retry);
+             ++retry <= DURATION_MAX_RETRY);
 
     av_opt_set_int(ic, "skip_changes", 0, AV_OPT_SEARCH_CHILDREN);
 
@@ -2439,7 +2423,6 @@ static int extract_extradata_init(AVStream *st)
     if (!ret)
         goto finish;
 
-    av_bsf_free(&sti->extract_extradata.bsf);
     ret = av_bsf_alloc(f, &sti->extract_extradata.bsf);
     if (ret < 0)
         return ret;

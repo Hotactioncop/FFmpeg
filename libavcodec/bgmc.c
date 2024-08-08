@@ -26,7 +26,6 @@
  */
 
 #include "libavutil/attributes.h"
-#include "libavutil/mem.h"
 #include "bgmc.h"
 
 #define FREQ_BITS  14                      // bits used by frequency counters

@@ -26,7 +26,6 @@
 #include <libmodplug/modplug.h>
 #include "libavutil/avstring.h"
 #include "libavutil/eval.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "avformat.h"
 #include "demux.h"

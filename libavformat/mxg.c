@@ -22,7 +22,6 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 #include "libavcodec/mjpeg.h"
 #include "avformat.h"
 #include "demux.h"

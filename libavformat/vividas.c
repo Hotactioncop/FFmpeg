@@ -30,7 +30,6 @@
 
 #include "libavutil/avassert.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 #include "avio_internal.h"
 #include "avformat.h"
 #include "demux.h"

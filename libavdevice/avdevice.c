@@ -17,7 +17,6 @@
  */
 
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "avdevice.h"
 #include "internal.h"
 #include "libavformat/demux.h"

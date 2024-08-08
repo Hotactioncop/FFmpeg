@@ -34,7 +34,8 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/crc.h"
-#include "libavutil/mem.h"
+#include "bytestream.h"
+#include "parser.h"
 #include "flac_parse.h"
 
 /** maximum number of adjacent headers that compare CRCs against each other   */

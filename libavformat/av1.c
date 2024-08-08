@@ -21,7 +21,6 @@
 
 #include "libavutil/avassert.h"
 #include "libavutil/mem.h"
-#include "libavutil/pixfmt.h"
 #include "libavcodec/av1.h"
 #include "libavcodec/av1_parse.h"
 #include "libavcodec/defs.h"

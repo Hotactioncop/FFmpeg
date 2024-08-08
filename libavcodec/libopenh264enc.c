@@ -24,7 +24,6 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
@@ -33,6 +32,7 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "encode.h"
+#include "internal.h"
 #include "libopenh264.h"
 
 #if !OPENH264_VER_AT_LEAST(1, 6)

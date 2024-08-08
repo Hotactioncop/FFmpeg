@@ -34,7 +34,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/file_open.h"
 #include "libavutil/float_dsp.h"
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/tx.h"

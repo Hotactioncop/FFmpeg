@@ -20,7 +20,6 @@
  */
 
 #include "libavutil/crc.h"
-#include "libavutil/mem.h"
 
 #define BITSTREAM_READER_LE
 #include "libavcodec/tak.h"

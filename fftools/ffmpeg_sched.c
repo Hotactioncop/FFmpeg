@@ -983,40 +983,20 @@ int sch_connect(Scheduler *sch, SchedulerNode src, SchedulerNode dst)
         }
     case SCH_NODE_TYPE_FILTER_OUT: {
         SchFilterOut *fo;
+        SchEnc      *enc;
 
         av_assert0(src.idx < sch->nb_filters &&
                    src.idx_stream < sch->filters[src.idx].nb_outputs);
-        fo = &sch->filters[src.idx].outputs[src.idx_stream];
+        // filtered frames go to encoding
+        av_assert0(dst.type == SCH_NODE_TYPE_ENC &&
+                   dst.idx < sch->nb_enc);
 
-        av_assert0(!fo->dst.type);
-        fo->dst = dst;
+        fo  = &sch->filters[src.idx].outputs[src.idx_stream];
+        enc = &sch->enc[dst.idx];
 
-        // filtered frames go to encoding or another filtergraph
-        switch (dst.type) {
-        case SCH_NODE_TYPE_ENC: {
-            SchEnc *enc;
-
-            av_assert0(dst.idx < sch->nb_enc);
-            enc = &sch->enc[dst.idx];
-
-            av_assert0(!enc->src.type);
-            enc->src = src;
-            break;
-            }
-        case SCH_NODE_TYPE_FILTER_IN: {
-            SchFilterIn *fi;
-
-            av_assert0(dst.idx < sch->nb_filters &&
-                       dst.idx_stream < sch->filters[dst.idx].nb_inputs);
-            fi = &sch->filters[dst.idx].inputs[dst.idx_stream];
-
-            av_assert0(!fi->src.type);
-            fi->src = src;
-            break;
-            }
-        default: av_assert0(0);
-        }
-
+        av_assert0(!fo->dst.type && !enc->src.type);
+        fo->dst  = dst;
+        enc->src = src;
 
         break;
         }
@@ -1371,13 +1351,24 @@ static int check_acyclic(Scheduler *sch)
         goto fail;
     }
 
-    // trace the transcoding graph upstream from every filtegraph
-    for (unsigned i = 0; i < sch->nb_filters; i++) {
-        ret = check_acyclic_for_output(sch, (SchedulerNode){ .idx = i },
-                                       filters_visited, filters_stack);
-        if (ret < 0) {
-            av_log(&sch->filters[i], AV_LOG_ERROR, "Transcoding graph has a cycle\n");
-            goto fail;
+    // trace the transcoding graph upstream from every output stream
+    // fed by a filtergraph
+    for (unsigned i = 0; i < sch->nb_mux; i++) {
+        SchMux *mux = &sch->mux[i];
+
+        for (unsigned j = 0; j < mux->nb_streams; j++) {
+            SchMuxStream  *ms = &mux->streams[j];
+            SchedulerNode src = ms->src_sched;
+
+            if (src.type != SCH_NODE_TYPE_FILTER_OUT)
+                continue;
+            src.idx_stream = 0;
+
+            ret = check_acyclic_for_output(sch, src, filters_visited, filters_stack);
+            if (ret < 0) {
+                av_log(mux, AV_LOG_ERROR, "Transcoding graph has a cycle\n");
+                goto fail;
+            }
         }
     }
 
@@ -1493,18 +1484,13 @@ static int start_prepare(Scheduler *sch)
                        "Filtergraph input %u not connected to a source\n", j);
                 return AVERROR(EINVAL);
             }
+            av_assert0(fi->src.type == SCH_NODE_TYPE_DEC);
+            dec = &sch->dec[fi->src.idx];
 
-            if (fi->src.type == SCH_NODE_TYPE_FILTER_OUT)
-                fi->src_sched = fi->src;
-            else {
-                av_assert0(fi->src.type == SCH_NODE_TYPE_DEC);
-                dec = &sch->dec[fi->src.idx];
-
-                switch (dec->src.type) {
-                case SCH_NODE_TYPE_DEMUX: fi->src_sched = dec->src;                   break;
-                case SCH_NODE_TYPE_ENC:   fi->src_sched = sch->enc[dec->src.idx].src; break;
-                default: av_assert0(0);
-                }
+            switch (dec->src.type) {
+            case SCH_NODE_TYPE_DEMUX: fi->src_sched = dec->src;                   break;
+            case SCH_NODE_TYPE_ENC:   fi->src_sched = sch->enc[dec->src.idx].src; break;
+            default: av_assert0(0);
             }
         }
 
@@ -2174,7 +2160,7 @@ finish:
 int sch_dec_send(Scheduler *sch, unsigned dec_idx, AVFrame *frame)
 {
     SchDec *dec;
-    int ret;
+    int ret = 0;
     unsigned nb_done = 0;
 
     av_assert0(dec_idx < sch->nb_dec);
@@ -2201,6 +2187,7 @@ int sch_dec_send(Scheduler *sch, unsigned dec_idx, AVFrame *frame)
             av_frame_unref(to_send);
             if (ret == AVERROR_EOF) {
                 nb_done++;
+                ret = 0;
                 continue;
             }
             return ret;
@@ -2299,13 +2286,15 @@ int sch_enc_send(Scheduler *sch, unsigned enc_idx, AVPacket *pkt)
         ret = enc_send_to_dst(sch, enc->dst[i], finished, to_send);
         if (ret < 0) {
             av_packet_unref(to_send);
-            if (ret == AVERROR_EOF)
+            if (ret == AVERROR_EOF) {
+                ret = 0;
                 continue;
+            }
             return ret;
         }
     }
 
-    return 0;
+    return ret;
 }
 
 static int enc_done(Scheduler *sch, unsigned enc_idx)
@@ -2392,17 +2381,12 @@ void sch_filter_receive_finish(Scheduler *sch, unsigned fg_idx, unsigned in_idx)
 int sch_filter_send(Scheduler *sch, unsigned fg_idx, unsigned out_idx, AVFrame *frame)
 {
     SchFilterGraph *fg;
-    SchedulerNode  dst;
 
     av_assert0(fg_idx < sch->nb_filters);
     fg = &sch->filters[fg_idx];
 
     av_assert0(out_idx < fg->nb_outputs);
-    dst = fg->outputs[out_idx].dst;
-
-    return (dst.type == SCH_NODE_TYPE_ENC)                                    ?
-           send_to_enc   (sch, &sch->enc[dst.idx],                     frame) :
-           send_to_filter(sch, &sch->filters[dst.idx], dst.idx_stream, frame);
+    return send_to_enc(sch, &sch->enc[fg->outputs[out_idx].dst.idx], frame);
 }
 
 static int filter_done(Scheduler *sch, unsigned fg_idx)
@@ -2414,11 +2398,8 @@ static int filter_done(Scheduler *sch, unsigned fg_idx)
         tq_receive_finish(fg->queue, i);
 
     for (unsigned i = 0; i < fg->nb_outputs; i++) {
-        SchedulerNode dst = fg->outputs[i].dst;
-        int err = (dst.type == SCH_NODE_TYPE_ENC)                                   ?
-                  send_to_enc   (sch, &sch->enc[dst.idx],                     NULL) :
-                  send_to_filter(sch, &sch->filters[dst.idx], dst.idx_stream, NULL);
-
+        SchEnc *enc = &sch->enc[fg->outputs[i].dst.idx];
+        int err = send_to_enc(sch, enc, NULL);
         if (err < 0 && err != AVERROR_EOF)
             ret = err_merge(ret, err);
     }

@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"

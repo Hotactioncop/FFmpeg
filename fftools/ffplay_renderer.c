@@ -42,7 +42,6 @@
 #include <SDL_vulkan.h>
 
 #include "libavutil/bprint.h"
-#include "libavutil/mem.h"
 
 #endif
 

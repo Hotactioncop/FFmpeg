@@ -23,7 +23,6 @@
 #include <inttypes.h>
 
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 #include "bswapdsp.h"
 #include "canopus.h"
 #include "get_bits.h"
@@ -460,6 +459,9 @@ static int cllc_decode_frame(AVCodecContext *avctx, AVFrame *pic,
         av_log(avctx, AV_LOG_ERROR, "Unknown coding type: %d.\n", coding_type);
         return AVERROR_INVALIDDATA;
     }
+
+    pic->flags |= AV_FRAME_FLAG_KEY;
+    pic->pict_type = AV_PICTURE_TYPE_I;
 
     *got_picture_ptr = 1;
 

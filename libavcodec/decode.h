@@ -173,16 +173,7 @@ int ff_frame_new_side_data(const AVCodecContext *avctx, AVFrame *frame,
  */
 int ff_frame_new_side_data_from_buf(const AVCodecContext *avctx,
                                     AVFrame *frame, enum AVFrameSideDataType type,
-                                    AVBufferRef **buf);
-
-/**
- * Same as `ff_frame_new_side_data_from_buf`, but taking a AVFrameSideData
- * array directly instead of an AVFrame.
- */
-int ff_frame_new_side_data_from_buf_ext(const AVCodecContext *avctx,
-                                        AVFrameSideData ***sd, int *nb_sd,
-                                        enum AVFrameSideDataType type,
-                                        AVBufferRef **buf);
+                                    AVBufferRef **buf, AVFrameSideData **sd);
 
 struct AVMasteringDisplayMetadata;
 struct AVContentLightMetadata;
@@ -197,14 +188,6 @@ int ff_decode_mastering_display_new(const AVCodecContext *avctx, AVFrame *frame,
                                     struct AVMasteringDisplayMetadata **mdm);
 
 /**
- * Same as `ff_decode_mastering_display_new`, but taking a AVFrameSideData
- * array directly instead of an AVFrame.
- */
-int ff_decode_mastering_display_new_ext(const AVCodecContext *avctx,
-                                        AVFrameSideData ***sd, int *nb_sd,
-                                        struct AVMasteringDisplayMetadata **mdm);
-
-/**
  * Wrapper around av_content_light_metadata_create_side_data(), which
  * rejects side data overridden by the demuxer. Returns 0 on success, and a
  * negative error code otherwise. If successful, *clm may either be a pointer to
@@ -213,11 +196,4 @@ int ff_decode_mastering_display_new_ext(const AVCodecContext *avctx,
 int ff_decode_content_light_new(const AVCodecContext *avctx, AVFrame *frame,
                                 struct AVContentLightMetadata **clm);
 
-/**
- * Same as `ff_decode_content_light_new`, but taking a AVFrameSideData
- * array directly instead of an AVFrame.
- */
-int ff_decode_content_light_new_ext(const AVCodecContext *avctx,
-                                    AVFrameSideData ***sd, int *nb_sd,
-                                    struct AVContentLightMetadata **clm);
 #endif /* AVCODEC_DECODE_H */

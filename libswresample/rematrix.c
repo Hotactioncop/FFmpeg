@@ -21,7 +21,6 @@
 #include "swresample_internal.h"
 #include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
-#include "libavutil/mem.h"
 
 #define TEMPLATE_REMATRIX_FLT
 #include "rematrix_template.c"

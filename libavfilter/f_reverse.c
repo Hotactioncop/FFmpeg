@@ -20,7 +20,6 @@
 
 #include "config_components.h"
 
-#include "libavutil/mem.h"
 #include "avfilter.h"
 #include "internal.h"
 

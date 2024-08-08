@@ -27,7 +27,7 @@
 
 #include <zmq.h>
 #include "libavutil/avstring.h"
-#include "libavutil/mem.h"
+#include "libavutil/bprint.h"
 #include "libavutil/opt.h"
 #include "avfilter.h"
 #include "internal.h"

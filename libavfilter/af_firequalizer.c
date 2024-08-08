@@ -20,7 +20,6 @@
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/file_open.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/eval.h"
 #include "libavutil/avassert.h"
