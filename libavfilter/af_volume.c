@@ -29,7 +29,7 @@
 #include "libavutil/eval.h"
 #include "libavutil/ffmath.h"
 #include "libavutil/float_dsp.h"
-#include "libavutil/mem.h"
+#include "libavutil/intreadwrite.h"
 #include "libavutil/opt.h"
 #include "libavutil/replaygain.h"
 
@@ -127,6 +127,7 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     VolumeContext *vol = ctx->priv;
     av_expr_free(vol->volume_pexpr);
+    av_opt_free(vol);
     av_freep(&vol->fdsp);
 }
 

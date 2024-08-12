@@ -89,7 +89,6 @@
 #include <inttypes.h>
 
 #include "libavutil/audio_fifo.h"
-#include "libavutil/mem.h"
 #include "libavutil/tx.h"
 #include "libavutil/ffmath.h"
 #include "libavutil/float_dsp.h"
@@ -2024,7 +2023,7 @@ static av_cold int xma_decode_init(AVCodecContext *avctx)
             return AVERROR(ENOMEM);
     }
 
-    return 0;
+    return ret;
 }
 
 static av_cold int xma_decode_end(AVCodecContext *avctx)

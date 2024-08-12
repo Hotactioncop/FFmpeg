@@ -25,7 +25,6 @@
  * @author Ronald S. Bultje <rbultje@ronald.bitfreak.net>
  */
 
-#include "libavutil/mem.h"
 #include "avformat.h"
 #include "internal.h"
 #include "avio_internal.h"

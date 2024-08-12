@@ -29,7 +29,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
 #include "libavutil/eval.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #define MIN_FILTER_SIZE 3

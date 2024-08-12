@@ -31,7 +31,6 @@
 #include "codec_internal.h"
 #include "libavutil/bprint.h"
 #include "libavutil/internal.h"
-#include "libavutil/mem.h"
 #include "ass_split.h"
 #include "ttmlenc.h"
 

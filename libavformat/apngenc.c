@@ -27,7 +27,6 @@
 #include "libavutil/crc.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/log.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavcodec/apng.h"
 #include "libavcodec/png.h"

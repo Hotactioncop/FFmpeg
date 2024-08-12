@@ -28,7 +28,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/common.h"
 #include "libavutil/lfg.h"
-#include "libavutil/mem.h"
 #include "elbg.h"
 
 #define DELTA_ERR_MAX 0.1  ///< Precision of the ELBG algorithm (as percentage error)

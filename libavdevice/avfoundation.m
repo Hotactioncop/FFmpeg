@@ -29,7 +29,6 @@
 #include <pthread.h>
 
 #include "libavutil/channel_layout.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
 #include "libavutil/avstring.h"

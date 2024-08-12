@@ -25,7 +25,6 @@
 
 #include <float.h> /* DBL_MAX */
 
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/timestamp.h"
 #include "audio.h"

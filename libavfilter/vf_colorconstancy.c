@@ -28,9 +28,8 @@
  * J. van de Weijer, Th. Gevers, A. Gijsenij "Edge-Based Color Constancy".
  */
 
-#include "libavutil/mem.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
-#include "libavutil/pixdesc.h"
 
 #include "avfilter.h"
 #include "internal.h"

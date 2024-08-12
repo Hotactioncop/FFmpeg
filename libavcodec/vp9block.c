@@ -22,9 +22,8 @@
  */
 
 #include "libavutil/avassert.h"
-#include "libavutil/frame.h"
 
-#include "progressframe.h"
+#include "threadframe.h"
 #include "vp89_rac.h"
 #include "vp9.h"
 #include "vp9data.h"
@@ -114,7 +113,7 @@ static void decode_mode(VP9TileData *td)
             uint8_t *refsegmap = s->s.frames[REF_FRAME_SEGMAP].segmentation_map;
 
             if (!s->s.frames[REF_FRAME_SEGMAP].uses_2pass)
-                ff_progress_frame_await(&s->s.frames[REF_FRAME_SEGMAP].tf, row >> 3);
+                ff_thread_await_progress(&s->s.frames[REF_FRAME_SEGMAP].tf, row >> 3, 0);
             for (y = 0; y < h4; y++) {
                 int idx_base = (y + row) * 8 * s->sb_cols + col;
                 for (x = 0; x < w4; x++)

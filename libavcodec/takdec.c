@@ -26,7 +26,6 @@
  */
 
 #include "libavutil/internal.h"
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/samplefmt.h"
 

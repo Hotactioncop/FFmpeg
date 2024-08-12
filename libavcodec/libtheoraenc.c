@@ -33,7 +33,6 @@
 /* FFmpeg includes */
 #include "libavutil/common.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/log.h"
 #include "libavutil/base64.h"

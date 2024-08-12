@@ -36,7 +36,6 @@
 #include "libavutil/emms.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
 #include "blockdsp.h"
@@ -843,8 +842,9 @@ static int decode_block(MJpegDecodeContext *s, int16_t *block, int component,
         return AVERROR_INVALIDDATA;
     }
     val = val * (unsigned)quant_matrix[0] + s->last_dc[component];
+    val = av_clip_int16(val);
     s->last_dc[component] = val;
-    block[0] = av_clip_int16(val);
+    block[0] = val;
     /* AC coefs */
     i = 0;
     {OPEN_READER(re, &s->gb);

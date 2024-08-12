@@ -24,7 +24,6 @@
  * WebP encoder using libwebp (WebPEncode API)
  */
 
-#include "libavutil/mem.h"
 #include "codec_internal.h"
 #include "encode.h"
 #include "libwebpenc_common.h"

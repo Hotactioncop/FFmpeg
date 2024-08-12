@@ -364,7 +364,6 @@ const AVFilter ff_vf_trim = {
     .activate    = activate,
     .priv_size   = sizeof(TrimContext),
     .priv_class  = &trim_class,
-    .flags       = AVFILTER_FLAG_METADATA_ONLY,
     FILTER_INPUTS(trim_inputs),
     FILTER_OUTPUTS(ff_video_default_filterpad),
 };

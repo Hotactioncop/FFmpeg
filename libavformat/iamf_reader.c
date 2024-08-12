@@ -22,7 +22,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/log.h"
-#include "libavutil/mem.h"
 #include "libavcodec/mathops.h"
 #include "libavcodec/packet.h"
 #include "avformat.h"
@@ -276,8 +275,7 @@ int ff_iamf_read_packet(AVFormatContext *s, IAMFDemuxContext *c,
         unsigned skip_samples, discard_padding;
         int ret, len, size, start_pos;
 
-        ret = ffio_ensure_seekback(pb, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size));
-        if (ret < 0)
+        if ((ret = ffio_ensure_seekback(pb, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size))) < 0)
             return ret;
         size = avio_read(pb, header, FFMIN(MAX_IAMF_OBU_HEADER_SIZE, max_size));
         if (size < 0)

@@ -21,6 +21,7 @@
 
 #include <AMF/core/Factory.h>
 
+#include <AMF/components/ColorSpace.h>
 #include <AMF/components/VideoEncoderVCE.h>
 #include <AMF/components/VideoEncoderHEVC.h>
 #include <AMF/components/VideoEncoderAV1.h>
@@ -89,6 +90,7 @@ typedef struct AmfContext {
     int                 quality;
     int                 b_frame_delta_qp;
     int                 ref_b_frame_delta_qp;
+    int                 smart_access_video;
 
     // Dynamic options, can be set after Init() call
 
@@ -169,6 +171,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt);
 * Supported formats
 */
 extern const enum AVPixelFormat ff_amf_pix_fmts[];
+
+int ff_amf_get_color_profile(AVCodecContext *avctx);
 
 /**
 * Error handling helper

@@ -24,7 +24,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/dict.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavcodec/codec_desc.h"
 #include "avformat.h"

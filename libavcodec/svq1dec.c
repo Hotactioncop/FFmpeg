@@ -33,7 +33,6 @@
  */
 
 #include "libavutil/crc.h"
-#include "libavutil/mem.h"
 #include "libavutil/thread.h"
 
 #include "avcodec.h"

@@ -37,7 +37,6 @@
 
 #include "libavutil/common.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"

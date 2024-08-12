@@ -23,7 +23,6 @@
 #include "libavutil/hdr_dynamic_metadata.h"
 #include "libavutil/film_grain_params.h"
 #include "libavutil/mastering_display_metadata.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
@@ -38,8 +37,8 @@
 #include "itut35.h"
 #include "hwconfig.h"
 #include "profiles.h"
-#include "progressframe.h"
 #include "refstruct.h"
+#include "thread.h"
 
 /**< same with Div_Lut defined in spec 7.11.3.7 */
 static const uint16_t div_lut[AV1_DIV_LUT_NUM] = {
@@ -677,7 +676,7 @@ static int get_pixel_format(AVCodecContext *avctx)
 
 static void av1_frame_unref(AV1Frame *f)
 {
-    ff_progress_frame_unref(&f->pf);
+    av_frame_unref(f->f);
     ff_refstruct_unref(&f->hwaccel_picture_private);
     ff_refstruct_unref(&f->header_ref);
     f->raw_frame_header = NULL;
@@ -688,15 +687,20 @@ static void av1_frame_unref(AV1Frame *f)
     f->coded_lossless = 0;
 }
 
-static void av1_frame_replace(AV1Frame *dst, const AV1Frame *src)
+static int av1_frame_ref(AVCodecContext *avctx, AV1Frame *dst, const AV1Frame *src)
 {
-    av_assert1(dst != src);
+    int ret;
 
     ff_refstruct_replace(&dst->header_ref, src->header_ref);
 
     dst->raw_frame_header = src->raw_frame_header;
 
-    ff_progress_frame_replace(&dst->pf, &src->pf);
+    if (!src->f->buf[0])
+        return 0;
+
+    ret = av_frame_ref(dst->f, src->f);
+    if (ret < 0)
+        goto fail;
 
     ff_refstruct_replace(&dst->hwaccel_picture_private,
                           src->hwaccel_picture_private);
@@ -727,6 +731,12 @@ static void av1_frame_replace(AV1Frame *dst, const AV1Frame *src)
            sizeof(dst->order_hints));
 
     dst->force_integer_mv = src->force_integer_mv;
+
+    return 0;
+
+fail:
+    av1_frame_unref(dst);
+    return AVERROR(ENOMEM);
 }
 
 static av_cold int av1_decode_free(AVCodecContext *avctx)
@@ -734,9 +744,16 @@ static av_cold int av1_decode_free(AVCodecContext *avctx)
     AV1DecContext *s = avctx->priv_data;
     AV1RawMetadataITUTT35 itut_t35;
 
-    for (int i = 0; i < FF_ARRAY_ELEMS(s->ref); i++)
-        av1_frame_unref(&s->ref[i]);
-    av1_frame_unref(&s->cur_frame);
+    for (int i = 0; i < FF_ARRAY_ELEMS(s->ref); i++) {
+        if (s->ref[i].f) {
+            av1_frame_unref(&s->ref[i]);
+            av_frame_free(&s->ref[i].f);
+        }
+    }
+    if (s->cur_frame.f) {
+        av1_frame_unref(&s->cur_frame);
+        av_frame_free(&s->cur_frame.f);
+    }
     av_buffer_unref(&s->seq_data_ref);
     ff_refstruct_unref(&s->seq_ref);
     ff_refstruct_unref(&s->header_ref);
@@ -852,6 +869,16 @@ static av_cold int av1_decode_init(AVCodecContext *avctx)
     s->pkt = avctx->internal->in_pkt;
     s->pix_fmt = AV_PIX_FMT_NONE;
 
+    for (int i = 0; i < FF_ARRAY_ELEMS(s->ref); i++) {
+        s->ref[i].f = av_frame_alloc();
+        if (!s->ref[i].f)
+            return AVERROR(ENOMEM);
+    }
+
+    s->cur_frame.f = av_frame_alloc();
+    if (!s->cur_frame.f)
+        return AVERROR(ENOMEM);
+
     ret = ff_cbs_init(&s->cbc, AV_CODEC_ID_AV1, avctx);
     if (ret < 0)
         return ret;
@@ -892,10 +919,10 @@ static av_cold int av1_decode_init(AVCodecContext *avctx)
     }
 
     s->dovi.logctx = avctx;
-    s->dovi.cfg.dv_profile = 10; // default for AV1
+    s->dovi.dv_profile = 10; // default for AV1
     sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
-    if (sd && sd->size >= sizeof(s->dovi.cfg))
-        s->dovi.cfg = *(AVDOVIDecoderConfigurationRecord *) sd->data;
+    if (sd && sd->size > 0)
+        ff_dovi_update_cfg(&s->dovi, (AVDOVIDecoderConfigurationRecord *) sd->data);
 
     return ret;
 }
@@ -913,8 +940,7 @@ static int av1_frame_alloc(AVCodecContext *avctx, AV1Frame *f)
         return ret;
     }
 
-    ret = ff_progress_frame_get_buffer(avctx, &f->pf, AV_GET_BUFFER_FLAG_REF);
-    if (ret < 0)
+    if ((ret = ff_thread_get_buffer(avctx, f->f, AV_GET_BUFFER_FLAG_REF)) < 0)
         goto fail;
 
     frame = f->f;
@@ -970,7 +996,7 @@ static int export_itut_t35(AVCodecContext *avctx, AVFrame *frame,
             if (!ret)
                 break;
 
-            ret = ff_frame_new_side_data_from_buf(avctx, frame, AV_FRAME_DATA_A53_CC, &buf);
+            ret = ff_frame_new_side_data_from_buf(avctx, frame, AV_FRAME_DATA_A53_CC, &buf, NULL);
             if (ret < 0)
                 return ret;
 
@@ -1002,16 +1028,29 @@ static int export_itut_t35(AVCodecContext *avctx, AVFrame *frame,
         break;
     }
     case ITU_T_T35_PROVIDER_CODE_DOLBY: {
+        AVBufferRef *rpu_buf;
+        AVFrameSideData *rpu;
         int provider_oriented_code = bytestream2_get_be32(&gb);
         if (itut_t35->itu_t_t35_country_code != ITU_T_T35_COUNTRY_CODE_US ||
             provider_oriented_code != 0x800)
             break;
 
-        ret = ff_dovi_rpu_parse(&s->dovi, gb.buffer, gb.buffer_end - gb.buffer,
-                                avctx->err_recognition);
+        ret = ff_dovi_rpu_parse(&s->dovi, gb.buffer, gb.buffer_end - gb.buffer);
         if (ret < 0) {
             av_log(avctx, AV_LOG_WARNING, "Error parsing DOVI OBU.\n");
             break; // ignore
+        }
+
+        rpu_buf = av_buffer_alloc(itut_t35->payload_size);
+        if (rpu_buf) {
+            memcpy(rpu_buf->data, itut_t35->payload, itut_t35->payload_size);
+            rpu = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_DOVI_RPU_BUFFER_T35, rpu_buf);
+            if (!rpu) {
+                av_buffer_unref(&rpu_buf);
+                return AVERROR(ENOMEM);
+            }
+        } else {
+            return AVERROR(ENOMEM);
         }
 
         ret = ff_dovi_attach_side_data(&s->dovi, frame);
@@ -1191,15 +1230,23 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return 0;
 }
 
-static void update_reference_list(AVCodecContext *avctx)
+static int update_reference_list(AVCodecContext *avctx)
 {
     AV1DecContext *s = avctx->priv_data;
     const AV1RawFrameHeader *header = s->raw_frame_header;
+    int ret;
 
     for (int i = 0; i < AV1_NUM_REF_FRAMES; i++) {
-        if (header->refresh_frame_flags & (1 << i))
-            av1_frame_replace(&s->ref[i], &s->cur_frame);
+        if (header->refresh_frame_flags & (1 << i)) {
+            av1_frame_unref(&s->ref[i]);
+            if ((ret = av1_frame_ref(avctx, &s->ref[i], &s->cur_frame)) < 0) {
+                av_log(avctx, AV_LOG_ERROR,
+                       "Failed to update frame %d in reference list\n", i);
+                return ret;
+            }
+        }
     }
+    return 0;
 }
 
 static int get_current_frame(AVCodecContext *avctx)
@@ -1333,22 +1380,29 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
                 s->raw_frame_header = &obu->obu.frame_header;
 
             if (s->raw_frame_header->show_existing_frame) {
-                av1_frame_replace(&s->cur_frame,
-                                  &s->ref[s->raw_frame_header->frame_to_show_map_idx]);
+                av1_frame_unref(&s->cur_frame);
 
-                update_reference_list(avctx);
+                ret = av1_frame_ref(avctx, &s->cur_frame,
+                                    &s->ref[s->raw_frame_header->frame_to_show_map_idx]);
+                if (ret < 0) {
+                    av_log(avctx, AV_LOG_ERROR, "Failed to get reference frame.\n");
+                    goto end;
+                }
 
-                if (s->cur_frame.f) {
+                ret = update_reference_list(avctx);
+                if (ret < 0) {
+                    av_log(avctx, AV_LOG_ERROR, "Failed to update reference list.\n");
+                    goto end;
+                }
+
+                if (s->cur_frame.f->buf[0]) {
                     ret = set_output_frame(avctx, frame);
-                    if (ret < 0) {
+                    if (ret < 0)
                         av_log(avctx, AV_LOG_ERROR, "Set output frame error.\n");
-                        goto end;
-                    }
                 }
 
                 s->raw_frame_header = NULL;
                 i++;
-                ret = 0;
 
                 goto end;
             }
@@ -1362,7 +1416,7 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
             s->cur_frame.spatial_id  = header->spatial_id;
             s->cur_frame.temporal_id = header->temporal_id;
 
-            if (avctx->hwaccel && s->cur_frame.f) {
+            if (avctx->hwaccel && s->cur_frame.f->buf[0]) {
                 ret = FF_HW_CALL(avctx, start_frame, unit->data, unit->data_size);
                 if (ret < 0) {
                     av_log(avctx, AV_LOG_ERROR, "HW accel start frame fail.\n");
@@ -1388,7 +1442,7 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
             if (ret < 0)
                 goto end;
 
-            if (avctx->hwaccel && s->cur_frame.f) {
+            if (avctx->hwaccel && s->cur_frame.f->buf[0]) {
                 ret = FF_HW_CALL(avctx, decode_slice, raw_tile_group->tile_data.data,
                                  raw_tile_group->tile_data.data_size);
                 if (ret < 0) {
@@ -1439,7 +1493,7 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
 
         if (raw_tile_group && (s->tile_num == raw_tile_group->tg_end + 1)) {
             int show_frame = s->raw_frame_header->show_frame;
-            if (avctx->hwaccel && s->cur_frame.f) {
+            if (avctx->hwaccel && s->cur_frame.f->buf[0]) {
                 ret = FF_HW_SIMPLE_CALL(avctx, end_frame);
                 if (ret < 0) {
                     av_log(avctx, AV_LOG_ERROR, "HW accel end frame fail.\n");
@@ -1447,22 +1501,23 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
                 }
             }
 
-            update_reference_list(avctx);
+            ret = update_reference_list(avctx);
+            if (ret < 0) {
+                av_log(avctx, AV_LOG_ERROR, "Failed to update reference list.\n");
+                goto end;
+            }
 
-            raw_tile_group      = NULL;
-            s->raw_frame_header = NULL;
-
-            if (show_frame) {
-                // cur_frame.f needn't exist due to skip_frame.
-                if (s->cur_frame.f) {
-                    ret = set_output_frame(avctx, frame);
-                    if (ret < 0) {
-                        av_log(avctx, AV_LOG_ERROR, "Set output frame error\n");
-                        goto end;
-                    }
+            if (s->raw_frame_header->show_frame && s->cur_frame.f->buf[0]) {
+                ret = set_output_frame(avctx, frame);
+                if (ret < 0) {
+                    av_log(avctx, AV_LOG_ERROR, "Set output frame error\n");
+                    goto end;
                 }
+            }
+            raw_tile_group = NULL;
+            s->raw_frame_header = NULL;
+            if (show_frame) {
                 i++;
-                ret = 0;
                 goto end;
             }
         }
@@ -1566,9 +1621,7 @@ const FFCodec ff_av1_decoder = {
     .close                 = av1_decode_free,
     FF_CODEC_RECEIVE_FRAME_CB(av1_receive_frame),
     .p.capabilities        = AV_CODEC_CAP_DR1,
-    .caps_internal         = FF_CODEC_CAP_INIT_CLEANUP |
-                             FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM |
-                             FF_CODEC_CAP_USES_PROGRESSFRAMES,
+    .caps_internal         = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM,
     .flush                 = av1_decode_flush,
     .p.profiles            = NULL_IF_CONFIG_SMALL(ff_av1_profiles),
     .p.priv_class          = &av1_class,

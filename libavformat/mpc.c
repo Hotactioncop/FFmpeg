@@ -20,7 +20,6 @@
  */
 
 #include "libavutil/channel_layout.h"
-#include "libavutil/mem.h"
 
 #include "avformat.h"
 #include "demux.h"
@@ -112,7 +111,7 @@ static int mpc_read_header(AVFormatContext *s)
     if (s->pb->seekable & AVIO_SEEKABLE_NORMAL) {
         int64_t pos = avio_tell(s->pb);
         ff_ape_parse_tag(s);
-        if (av_dict_count(s->metadata) == 0)
+        if (!av_dict_get(s->metadata, "", NULL, AV_DICT_IGNORE_SUFFIX))
             ff_id3v1_read(s);
         avio_seek(s->pb, pos, SEEK_SET);
     }

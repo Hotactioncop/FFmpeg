@@ -25,7 +25,6 @@
 #include "libavcodec/ass.h"
 #include "libavutil/avstring.h"
 #include "libavutil/avutil.h"
-#include "libavutil/mem.h"
 #include "libavutil/thread.h"
 #include "libavutil/log.h"
 #include "libavutil/opt.h"

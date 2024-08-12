@@ -40,7 +40,6 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
 #include "libavutil/timecode.h"
 #include "dv.h"
 #include "libavutil/avassert.h"

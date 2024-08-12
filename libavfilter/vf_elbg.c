@@ -24,7 +24,6 @@
  */
 
 #include "libavcodec/elbg.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/random_seed.h"

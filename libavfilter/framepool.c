@@ -24,7 +24,6 @@
 #include "libavutil/buffer.h"
 #include "libavutil/frame.h"
 #include "libavutil/imgutils.h"
-#include "libavutil/imgutils_internal.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixfmt.h"
 

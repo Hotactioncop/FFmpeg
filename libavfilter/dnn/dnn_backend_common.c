@@ -21,7 +21,6 @@
  * DNN common functions different backends.
  */
 
-#include "libavutil/mem.h"
 #include "dnn_backend_common.h"
 
 #define DNN_ASYNC_SUCCESS (void *)0

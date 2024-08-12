@@ -48,7 +48,6 @@
 #include "libavutil/bprint.h"
 #include "libavutil/common.h"
 #include "libavutil/eval.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/parseutils.h"
@@ -950,7 +949,7 @@ static int func_eval_expr_int_format(void *ctx, AVBPrint *bp, const char *functi
                                         argv[1][0], positions);
 }
 
-static const FFExpandTextFunction expand_text_functions[] = {
+static FFExpandTextFunction expand_text_functions[] = {
     { "e",               1, 1, func_eval_expr },
     { "eif",             2, 3, func_eval_expr_int_format },
     { "expr",            1, 1, func_eval_expr },

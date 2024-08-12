@@ -26,7 +26,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/common.h"
 #include "libavutil/log.h"
-#include "libavutil/mem.h"
 #include "libavutil/time.h"
 
 #include "avcodec.h"

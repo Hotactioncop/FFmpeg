@@ -27,7 +27,6 @@
  * Known FOURCCs: 'ap4h' (444), 'apch' (HQ), 'apcn' (422), 'apcs' (LT), 'acpo' (Proxy)
  */
 
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
@@ -415,7 +414,7 @@ static void put_alpha_diff(PutBitContext *pb, int cur, int prev)
     const int dsize = 1 << dbits - 1;
     int diff = cur - prev;
 
-    diff = av_zero_extend(diff, abits);
+    diff = av_mod_uintp2(diff, abits);
     if (diff >= (1 << abits) - dsize)
         diff -= 1 << abits;
     if (diff < -dsize || diff > dsize || !diff) {

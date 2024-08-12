@@ -22,7 +22,6 @@
 
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
-#include "libavutil/mem.h"
 
 #include "avfilter.h"
 #include "filters.h"

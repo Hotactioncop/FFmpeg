@@ -37,9 +37,10 @@
 #include <string.h>
 
 #include "libavutil/avassert.h"
+#include "libavutil/common.h"
+#include "libavutil/internal.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/lfg.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"

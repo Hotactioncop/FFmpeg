@@ -33,7 +33,6 @@
 #include "libavutil/base64.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 typedef struct Fragment {

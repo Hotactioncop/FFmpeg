@@ -36,7 +36,6 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
 #include "libavutil/dict.h"
-#include "libavutil/mem.h"
 #include "caf.h"
 
 typedef struct CafContext {

@@ -21,17 +21,19 @@
  * A hardware accelerated overlay filter based on Intel Quick Sync Video VPP
  */
 
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/common.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/eval.h"
 #include "libavutil/hwcontext.h"
+#include "libavutil/avstring.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/mathematics.h"
 
 #include "internal.h"
 #include "avfilter.h"
 #include "formats.h"
+#include "video.h"
 
 #include "framesync.h"
 #include "qsvvpp.h"
@@ -228,16 +230,13 @@ static int process_frame(FFFrameSync *fs)
 {
     AVFilterContext  *ctx = fs->parent;
     QSVVPPContext    *qsv = fs->opaque;
-    AVFrame        *frame = NULL, *propref = NULL;
+    AVFrame        *frame = NULL;
     int               ret = 0, i;
 
     for (i = 0; i < ctx->nb_inputs; i++) {
         ret = ff_framesync_get_frame(fs, i, &frame, 0);
-        if (ret == 0) {
-            if (i == 0)
-                propref = frame;
-            ret = ff_qsvvpp_filter_frame(qsv, ctx->inputs[i], frame, propref);
-        }
+        if (ret == 0)
+            ret = ff_qsvvpp_filter_frame(qsv, ctx->inputs[i], frame);
         if (ret < 0 && ret != AVERROR(EAGAIN))
             break;
     }

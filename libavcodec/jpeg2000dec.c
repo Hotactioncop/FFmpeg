@@ -32,7 +32,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/common.h"
 #include "libavutil/imgutils.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avcodec.h"
@@ -1005,7 +1004,6 @@ static inline void select_header(Jpeg2000DecoderContext *s, const Jpeg2000Tile *
 {
     s->g = tile->tile_part[*tp_index].header_tpg;
     if (bytestream2_get_bytes_left(&s->g) == 0 && s->bit_index == 8) {
-        av_log(s->avctx, AV_LOG_WARNING, "Packet header bytes in PPM marker segment is too short.\n");
         if (*tp_index < FF_ARRAY_ELEMS(tile->tile_part) - 1) {
             s->g = tile->tile_part[++(*tp_index)].tpg;
         }
@@ -1015,18 +1013,10 @@ static inline void select_header(Jpeg2000DecoderContext *s, const Jpeg2000Tile *
 static inline void select_stream(Jpeg2000DecoderContext *s, const Jpeg2000Tile *tile,
                                  int *tp_index, const Jpeg2000CodingStyle *codsty)
 {
-    int32_t is_endof_tp;
-
     s->g = tile->tile_part[*tp_index].tpg;
-    is_endof_tp = bytestream2_get_bytes_left(&s->g) == 0 && s->bit_index == 8;
-    // Following while loop is necessary because a tilepart may include only SOD marker.
-    // Such a tilepart has neither packet header nor compressed data.
-    while (is_endof_tp) {
+    if (bytestream2_get_bytes_left(&s->g) == 0 && s->bit_index == 8) {
         if (*tp_index < FF_ARRAY_ELEMS(tile->tile_part) - 1) {
             s->g = tile->tile_part[++(*tp_index)].tpg;
-            is_endof_tp = bytestream2_get_bytes_left(&s->g) == 0 && s->bit_index == 8;
-        } else {
-            is_endof_tp = 0;
         }
     }
     if (codsty->csty & JPEG2000_CSTY_SOP) {
@@ -2512,6 +2502,8 @@ static int jpeg2000_decode_frame(AVCodecContext *avctx, AVFrame *picture,
     /* get picture buffer */
     if ((ret = ff_thread_get_buffer(avctx, picture, 0)) < 0)
         goto end;
+    picture->pict_type = AV_PICTURE_TYPE_I;
+    picture->flags |= AV_FRAME_FLAG_KEY;
 
     if (ret = jpeg2000_read_bitstream_packets(s))
         goto end;

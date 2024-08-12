@@ -31,7 +31,6 @@
 #include <math.h>
 
 #include "libavutil/float_dsp.h"
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/tx.h"
 

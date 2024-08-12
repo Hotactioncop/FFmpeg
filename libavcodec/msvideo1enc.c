@@ -29,7 +29,6 @@
 #include "encode.h"
 #include "bytestream.h"
 #include "libavutil/lfg.h"
-#include "libavutil/mem.h"
 #include "elbg.h"
 #include "libavutil/imgutils.h"
 /**

@@ -54,7 +54,6 @@
 #include "libavcodec/adts_parser.h"
 #include "libavcodec/dca.h"
 #include "libavcodec/dca_syncwords.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 typedef struct IEC61937Context {
