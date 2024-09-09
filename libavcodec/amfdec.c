@@ -567,6 +567,7 @@ static AMF_RESULT amf_buffer_from_packet(AVCodecContext *avctx, const AVPacket* 
 
 static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
 {
+    av_log(NULL, AV_LOG_INFO, "AMF Decoder initialized\n");
     AvAmfDecoderContext *ctx = avctx->priv_data;
     AMFBuffer           *buf;
     AMF_RESULT          res;
@@ -649,6 +650,8 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
     } else {
         av_log(avctx, AV_LOG_ERROR, "Unkown result from QueryOutput %d\n", res);
     }
+
+    av_log(NULL, AV_LOG_INFO, "AMF Decoder result %d\n", got_frame);
     return got_frame ? 0 : AVERROR(EAGAIN);
 }
 
