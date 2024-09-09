@@ -23,7 +23,6 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/common.h"
 #include "libavutil/eval.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
 #include "internal.h"

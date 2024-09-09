@@ -29,7 +29,6 @@
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/eval.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "formats.h"
@@ -112,12 +111,8 @@ static inline double getpix(void *priv, double x, double y, int plane)
         return 0;
 
     if (geq->interpolation == INTERP_BILINEAR) {
-        int xn, yn;
-
-        xi = x = av_clipd(x, 0, w - 1);
-        yi = y = av_clipd(y, 0, h - 1);
-        xn = FFMIN(xi + 1, w - 1);
-        yn = FFMIN(yi + 1, h - 1);
+        xi = x = av_clipd(x, 0, w - 2);
+        yi = y = av_clipd(y, 0, h - 2);
 
         x -= xi;
         y -= yi;
@@ -126,17 +121,17 @@ static inline double getpix(void *priv, double x, double y, int plane)
             const uint16_t *src16 = (const uint16_t*)src;
             linesize /= 2;
 
-            return (1-y)*((1-x)*src16[xi + yi * linesize] + x*src16[xn + yi * linesize])
-                  +   y *((1-x)*src16[xi + yn * linesize] + x*src16[xn + yn * linesize]);
+            return (1-y)*((1-x)*src16[xi +  yi    * linesize] + x*src16[xi + 1 +  yi    * linesize])
+                  +   y *((1-x)*src16[xi + (yi+1) * linesize] + x*src16[xi + 1 + (yi+1) * linesize]);
         } else if (geq->bps == 32) {
             const float *src32 = (const float*)src;
             linesize /= 4;
 
-            return (1-y)*((1-x)*src32[xi + yi * linesize] + x*src32[xn + yi * linesize])
-                  +   y *((1-x)*src32[xi + yn * linesize] + x*src32[xn + yn * linesize]);
+            return (1-y)*((1-x)*src32[xi +  yi    * linesize] + x*src32[xi + 1 +  yi    * linesize])
+                  +   y *((1-x)*src32[xi + (yi+1) * linesize] + x*src32[xi + 1 + (yi+1) * linesize]);
         } else if (geq->bps == 8) {
-            return (1-y)*((1-x)*src[xi + yi * linesize] + x*src[xn + yi * linesize])
-                  +   y *((1-x)*src[xi + yn * linesize] + x*src[xn + yn * linesize]);
+            return (1-y)*((1-x)*src[xi +  yi    * linesize] + x*src[xi + 1 +  yi    * linesize])
+                  +   y *((1-x)*src[xi + (yi+1) * linesize] + x*src[xi + 1 + (yi+1) * linesize]);
         }
     } else {
         xi = av_clipd(x, 0, w - 1);

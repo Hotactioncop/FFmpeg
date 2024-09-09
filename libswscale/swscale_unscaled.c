@@ -297,7 +297,7 @@ static int planar8ToP01xleWrapper(SwsContext *c, const uint8_t *src[],
         const uint8_t *tsrc0 = src[0];
         for (x = c->srcW; x > 0; x--) {
             t = *tsrc0++;
-            output_pixel(tdstY++, (t << 8));
+            output_pixel(tdstY++, t | (t << 8));
         }
         src[0] += srcStride[0];
         dstY += dstStride[0] / 2;
@@ -308,9 +308,9 @@ static int planar8ToP01xleWrapper(SwsContext *c, const uint8_t *src[],
             const uint8_t *tsrc2 = src[2];
             for (x = c->srcW / 2; x > 0; x--) {
                 t = *tsrc1++;
-                output_pixel(tdstUV++, (t << 8));
+                output_pixel(tdstUV++, t | (t << 8));
                 t = *tsrc2++;
-                output_pixel(tdstUV++, (t << 8));
+                output_pixel(tdstUV++, t | (t << 8));
             }
             src[1] += srcStride[1];
             src[2] += srcStride[2];

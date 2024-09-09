@@ -31,7 +31,6 @@
 #include "avc.h"
 #include "url.h"
 
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/avstring.h"
 #include "libavutil/mathematics.h"

@@ -24,7 +24,6 @@
  */
 
 #include "libavutil/common.h"
-#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
 #include "internal.h"

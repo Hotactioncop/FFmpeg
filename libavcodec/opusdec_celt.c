@@ -27,7 +27,6 @@
 
 #include <float.h>
 
-#include "libavutil/mem.h"
 #include "opus_celt.h"
 #include "opustab.h"
 #include "opus_pvq.h"
@@ -460,9 +459,7 @@ int ff_celt_decode_frame(CeltFrame *f, OpusRangeCoder *rc,
         /* deemphasis */
         block->emph_coeff = f->opusdsp.deemphasis(output[i],
                                                   &block->buf[1024 - frame_size],
-                                                  block->emph_coeff,
-                                                  ff_opus_deemph_weights,
-                                                  frame_size);
+                                                  block->emph_coeff, frame_size);
     }
 
     if (channels == 1)
@@ -518,7 +515,7 @@ void ff_celt_flush(CeltFrame *f)
          * a lesser discontinuity when seeking.
          * The deemphasis functions differ from libopus in that they require
          * an initial state divided by the coefficient. */
-        block->emph_coeff = 0.0f / ff_opus_deemph_weights[0];
+        block->emph_coeff = 0.0f / CELT_EMPH_COEFF;
     }
     f->seed = 0;
 

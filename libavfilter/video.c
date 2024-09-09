@@ -26,7 +26,7 @@
 #include "libavutil/buffer.h"
 #include "libavutil/cpu.h"
 #include "libavutil/hwcontext.h"
-#include "libavutil/pixfmt.h"
+#include "libavutil/imgutils.h"
 
 #include "avfilter.h"
 #include "avfilter_internal.h"

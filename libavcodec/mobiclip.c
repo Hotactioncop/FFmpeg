@@ -24,7 +24,6 @@
 #include <inttypes.h>
 
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "libavutil/thread.h"
 
 #include "avcodec.h"

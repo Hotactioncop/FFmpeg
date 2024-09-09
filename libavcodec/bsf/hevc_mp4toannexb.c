@@ -28,8 +28,7 @@
 #include "bsf_internal.h"
 #include "bytestream.h"
 #include "defs.h"
-
-#include "hevc/hevc.h"
+#include "hevc.h"
 
 #define MIN_HEVCC_LENGTH 23
 
@@ -125,7 +124,6 @@ static int hevc_mp4toannexb_filter(AVBSFContext *ctx, AVPacket *out)
     AVPacket *in;
     GetByteContext gb;
 
-    int has_sps = 0, has_pps = 0;
     int got_irap = 0;
     int i, ret = 0;
 
@@ -159,14 +157,11 @@ static int hevc_mp4toannexb_filter(AVBSFContext *ctx, AVPacket *out)
         }
 
         nalu_type = (bytestream2_peek_byte(&gb) >> 1) & 0x3f;
-        has_sps = (has_sps || nalu_type == HEVC_NAL_SPS);
-        has_pps = (has_pps || nalu_type == HEVC_NAL_PPS);
 
         /* prepend extradata to IRAP frames */
         is_irap = nalu_type >= HEVC_NAL_BLA_W_LP &&
                   nalu_type <= HEVC_NAL_RSV_IRAP_VCL23;
-        /* ignore the extradata if IRAP frame has sps and pps */
-        add_extradata = is_irap && !got_irap && !(has_sps && has_pps);
+        add_extradata = is_irap && !got_irap;
         extra_size    = add_extradata * ctx->par_out->extradata_size;
         got_irap     |= is_irap;
 

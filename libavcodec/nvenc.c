@@ -23,7 +23,7 @@
 #include "config_components.h"
 
 #include "nvenc.h"
-#include "hevc/sei.h"
+#include "hevc_sei.h"
 #if CONFIG_AV1_NVENC_ENCODER
 #include "av1.h"
 #endif
@@ -242,20 +242,8 @@ static void nvenc_map_preset(NvencContext *ctx)
 
 static void nvenc_print_driver_requirement(AVCodecContext *avctx, int level)
 {
-#if NVENCAPI_CHECK_VERSION(12, 3)
+#if NVENCAPI_CHECK_VERSION(12, 1)
     const char *minver = "(unknown)";
-#elif NVENCAPI_CHECK_VERSION(12, 2)
-# if defined(_WIN32) || defined(__CYGWIN__)
-    const char *minver = "551.76";
-# else
-    const char *minver = "550.54.14";
-# endif
-#elif NVENCAPI_CHECK_VERSION(12, 1)
-# if defined(_WIN32) || defined(__CYGWIN__)
-    const char *minver = "531.61";
-# else
-    const char *minver = "530.41.03";
-# endif
 #elif NVENCAPI_CHECK_VERSION(12, 0)
 # if defined(_WIN32) || defined(__CYGWIN__)
     const char *minver = "522.25";
@@ -514,7 +502,7 @@ static int nvenc_check_capabilities(AVCodecContext *avctx)
     }
 
     ret = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_10BIT_ENCODE);
-    if ((IS_10BIT(ctx->data_pix_fmt) || ctx->highbitdepth) && ret <= 0) {
+    if (IS_10BIT(ctx->data_pix_fmt) && ret <= 0) {
         av_log(avctx, AV_LOG_WARNING, "10 bit encode not supported\n");
         return AVERROR(ENOSYS);
     }
@@ -605,33 +593,6 @@ static int nvenc_check_capabilities(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_WARNING, "Constrained encoding not supported by the device\n");
         return AVERROR(ENOSYS);
     }
-
-#ifdef NVENC_HAVE_TEMPORAL_FILTER
-    ret = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_TEMPORAL_FILTER);
-    if(ctx->tf_level > 0 && ret <= 0) {
-        av_log(avctx, AV_LOG_WARNING, "Temporal filtering not supported by the device\n");
-        return AVERROR(ENOSYS);
-    }
-#endif
-
-#ifdef NVENC_HAVE_LOOKAHEAD_LEVEL
-    ret = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_LOOKAHEAD_LEVEL);
-    if(ctx->rc_lookahead > 0 && ctx->lookahead_level > 0 &&
-       ctx->lookahead_level != NV_ENC_LOOKAHEAD_LEVEL_AUTOSELECT &&
-       ctx->lookahead_level > ret)
-    {
-        av_log(avctx, AV_LOG_WARNING, "Lookahead level not supported. Maximum level: %d\n", ret);
-        return AVERROR(ENOSYS);
-    }
-#endif
-
-#ifdef NVENC_HAVE_UNIDIR_B
-    ret = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_UNIDIRECTIONAL_B);
-    if(ctx->unidir_b && ret <= 0) {
-        av_log(avctx, AV_LOG_WARNING, "Unidirectional B-Frames not supported by the device\n");
-        return AVERROR(ENOSYS);
-    }
-#endif
 
     ctx->support_dyn_bitrate = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_DYN_BITRATE_CHANGE);
 
@@ -1026,7 +987,7 @@ static av_cold int nvenc_recalc_surfaces(AVCodecContext *avctx)
     return 0;
 }
 
-static av_cold int nvenc_setup_rate_control(AVCodecContext *avctx)
+static av_cold void nvenc_setup_rate_control(AVCodecContext *avctx)
 {
     NvencContext *ctx = avctx->priv_data;
 
@@ -1155,24 +1116,6 @@ static av_cold int nvenc_setup_rate_control(AVCodecContext *avctx)
             if (ctx->encode_config.rcParams.lookaheadDepth < ctx->rc_lookahead)
                 av_log(avctx, AV_LOG_WARNING, "Clipping lookahead depth to %d (from %d) due to lack of surfaces/delay",
                     ctx->encode_config.rcParams.lookaheadDepth, ctx->rc_lookahead);
-
-#ifdef NVENC_HAVE_LOOKAHEAD_LEVEL
-            if (ctx->lookahead_level >= 0) {
-                switch (ctx->lookahead_level) {
-                    case NV_ENC_LOOKAHEAD_LEVEL_0:
-                    case NV_ENC_LOOKAHEAD_LEVEL_1:
-                    case NV_ENC_LOOKAHEAD_LEVEL_2:
-                    case NV_ENC_LOOKAHEAD_LEVEL_3:
-                    case NV_ENC_LOOKAHEAD_LEVEL_AUTOSELECT:
-                        break;
-                    default:
-                        av_log(avctx, AV_LOG_ERROR, "Invalid lookahead level.\n");
-                        return AVERROR(EINVAL);
-                }
-
-                ctx->encode_config.rcParams.lookaheadLevel = ctx->lookahead_level;
-            }
-#endif
         }
     }
 
@@ -1200,8 +1143,6 @@ static av_cold int nvenc_setup_rate_control(AVCodecContext *avctx)
         ctx->encode_config.rcParams.vbvBufferSize = avctx->rc_buffer_size = 0;
         ctx->encode_config.rcParams.maxBitRate = avctx->rc_max_rate;
     }
-
-    return 0;
 }
 
 static av_cold int nvenc_setup_h264_config(AVCodecContext *avctx)
@@ -1420,8 +1361,8 @@ static av_cold int nvenc_setup_hevc_config(AVCodecContext *avctx)
         break;
     }
 
-    // force setting profile as main10 if input is 10 bit or if it should be encoded as 10 bit
-    if (IS_10BIT(ctx->data_pix_fmt) || ctx->highbitdepth) {
+    // force setting profile as main10 if input is 10 bit
+    if (IS_10BIT(ctx->data_pix_fmt)) {
         cc->profileGUID = NV_ENC_HEVC_PROFILE_MAIN10_GUID;
         avctx->profile = AV_PROFILE_HEVC_MAIN_10;
     }
@@ -1435,8 +1376,8 @@ static av_cold int nvenc_setup_hevc_config(AVCodecContext *avctx)
     hevc->chromaFormatIDC = IS_YUV444(ctx->data_pix_fmt) ? 3 : 1;
 
 #ifdef NVENC_HAVE_NEW_BIT_DEPTH_API
-    hevc->inputBitDepth = IS_10BIT(ctx->data_pix_fmt) ? NV_ENC_BIT_DEPTH_10 : NV_ENC_BIT_DEPTH_8;
-    hevc->outputBitDepth = (IS_10BIT(ctx->data_pix_fmt) || ctx->highbitdepth) ? NV_ENC_BIT_DEPTH_10 : NV_ENC_BIT_DEPTH_8;
+    hevc->inputBitDepth = hevc->outputBitDepth =
+        IS_10BIT(ctx->data_pix_fmt) ? NV_ENC_BIT_DEPTH_10 : NV_ENC_BIT_DEPTH_8;
 #else
     hevc->pixelBitDepthMinus8 = IS_10BIT(ctx->data_pix_fmt) ? 2 : 0;
 #endif
@@ -1453,25 +1394,6 @@ static av_cold int nvenc_setup_hevc_config(AVCodecContext *avctx)
 #ifdef NVENC_HAVE_MULTIPLE_REF_FRAMES
     hevc->numRefL0 = avctx->refs;
     hevc->numRefL1 = avctx->refs;
-#endif
-
-#ifdef NVENC_HAVE_TEMPORAL_FILTER
-    if (ctx->tf_level >= 0) {
-        hevc->tfLevel = ctx->tf_level;
-
-        switch (ctx->tf_level)
-        {
-            case NV_ENC_TEMPORAL_FILTER_LEVEL_0:
-            case NV_ENC_TEMPORAL_FILTER_LEVEL_4:
-                break;
-            default:
-                av_log(avctx, AV_LOG_ERROR, "Invalid temporal filtering level.\n");
-                return AVERROR(EINVAL);
-        }
-
-        if (ctx->encode_config.frameIntervalP < 5)
-            av_log(avctx, AV_LOG_WARNING, "Temporal filtering needs at least 4 B-Frames (-bf 4).\n");
-    }
 #endif
 
     return 0;
@@ -1678,10 +1600,6 @@ FF_DISABLE_DEPRECATION_WARNINGS
 FF_ENABLE_DEPRECATION_WARNINGS
     }
 
-#ifdef NVENC_HAVE_UNIDIR_B
-    ctx->init_encode_params.enableUniDirectionalB = ctx->unidir_b;
-#endif
-
     ctx->init_encode_params.enableEncodeAsync = 0;
     ctx->init_encode_params.enablePTD = 1;
 
@@ -1695,15 +1613,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     if (ctx->weighted_pred == 1)
         ctx->init_encode_params.enableWeightedPrediction = 1;
-
-#ifdef NVENC_HAVE_SPLIT_FRAME_ENCODING
-    ctx->init_encode_params.splitEncodeMode = ctx->split_encode_mode;
-
-    if (ctx->split_encode_mode != NV_ENC_SPLIT_DISABLE_MODE) {
-        if (avctx->codec->id == AV_CODEC_ID_HEVC && ctx->weighted_pred == 1)
-            av_log(avctx, AV_LOG_WARNING, "Split encoding not supported with weighted prediction enabled.\n");
-    }
-#endif
 
     if (ctx->bluray_compat) {
         ctx->aud = 1;
@@ -1739,9 +1648,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
     nvenc_recalc_surfaces(avctx);
 
-    res = nvenc_setup_rate_control(avctx);
-    if (res < 0)
-        return res;
+    nvenc_setup_rate_control(avctx);
 
     if (avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) {
         ctx->encode_config.frameFieldMode = NV_ENC_PARAMS_FRAME_FIELD_MODE_FIELD;
@@ -2793,7 +2700,6 @@ static int nvenc_send_frame(AVCodecContext *avctx, const AVFrame *frame)
             pic_params.encodePicFlags = 0;
         }
 
-        pic_params.frameIdx = ctx->frame_idx_counter++;
         pic_params.inputTimeStamp = frame->pts;
 
         if (ctx->extra_sei) {

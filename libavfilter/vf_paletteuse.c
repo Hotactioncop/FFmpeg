@@ -27,7 +27,6 @@
 #include "libavutil/bprint.h"
 #include "libavutil/file_open.h"
 #include "libavutil/internal.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/qsort.h"
 #include "avfilter.h"

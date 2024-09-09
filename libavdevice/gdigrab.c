@@ -31,7 +31,6 @@
 #include "config.h"
 #include "libavformat/demux.h"
 #include "libavformat/internal.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/time.h"
 #include "libavutil/wchar_filename.h"

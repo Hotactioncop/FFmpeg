@@ -23,11 +23,11 @@
  * Cineform HD video encoder
  */
 
-#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "libavutil/mem.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
-#include "libavutil/pixdesc.h"
 
 #include "avcodec.h"
 #include "bytestream.h"
@@ -36,6 +36,7 @@
 #include "codec_internal.h"
 #include "encode.h"
 #include "put_bits.h"
+#include "thread.h"
 
 /* Derived from existing tables from decoder */
 static const unsigned codebook[256][2] = {

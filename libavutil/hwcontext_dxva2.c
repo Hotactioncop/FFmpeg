@@ -31,7 +31,6 @@
 #include "hwcontext_dxva2.h"
 #include "hwcontext_internal.h"
 #include "imgutils.h"
-#include "mem.h"
 #include "pixdesc.h"
 #include "pixfmt.h"
 #include "compat/w32dlfcn.h"

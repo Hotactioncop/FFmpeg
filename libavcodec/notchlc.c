@@ -23,7 +23,6 @@
 #include <string.h>
 
 #define BITSTREAM_READER_LE
-#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "codec_internal.h"
@@ -516,6 +515,9 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *p,
     ret = decode_blocks(avctx, p, uncompressed_size);
     if (ret < 0)
         return ret;
+
+    p->pict_type = AV_PICTURE_TYPE_I;
+    p->flags |= AV_FRAME_FLAG_KEY;
 
     *got_frame = 1;
 

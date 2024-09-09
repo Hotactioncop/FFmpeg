@@ -25,7 +25,6 @@
  */
 
 #include "libavutil/imgutils.h"
-#include "libavutil/mem.h"
 #include "avcodec.h"
 #include "bytestream.h"
 #include "cga_data.h"

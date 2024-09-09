@@ -21,7 +21,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -477,7 +476,7 @@ static void put_alpha_diff(PutBitContext *pb, int cur, int prev, int abits)
     const int dsize = 1 << dbits - 1;
     int diff = cur - prev;
 
-    diff = av_zero_extend(diff, abits);
+    diff = av_mod_uintp2(diff, abits);
     if (diff >= (1 << abits) - dsize)
         diff -= 1 << abits;
     if (diff < -dsize || diff > dsize || !diff) {
@@ -721,7 +720,7 @@ static int est_alpha_diff(int cur, int prev, int abits)
     const int dsize = 1 << dbits - 1;
     int diff = cur - prev;
 
-    diff = av_zero_extend(diff, abits);
+    diff = av_mod_uintp2(diff, abits);
     if (diff >= (1 << abits) - dsize)
         diff -= 1 << abits;
     if (diff < -dsize || diff > dsize || !diff)

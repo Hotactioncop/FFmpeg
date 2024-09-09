@@ -20,7 +20,6 @@
  */
 
 #include "avformat.h"
-#include "libavutil/mem.h"
 #include "libavutil/parseutils.h"
 #include "libavutil/random_seed.h"
 #include "libavutil/avstring.h"

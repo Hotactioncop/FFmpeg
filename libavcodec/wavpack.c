@@ -20,8 +20,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/buffer.h"
 #include "libavutil/channel_layout.h"
-#include "libavutil/mem.h"
 
 #define BITSTREAM_READER_LE
 #include "avcodec.h"
@@ -30,7 +30,7 @@
 #include "get_bits.h"
 #include "refstruct.h"
 #include "thread.h"
-#include "threadprogress.h"
+#include "threadframe.h"
 #include "unary.h"
 #include "wavpack.h"
 #include "dsd.h"
@@ -103,14 +103,15 @@ typedef struct WavpackContext {
     WavpackFrameContext **fdec;
     int fdec_num;
 
+    int block;
     int samples;
     int ch_offset;
 
+    AVFrame *frame;
+    ThreadFrame curr_frame, prev_frame;
     Modulation modulation;
 
     DSDContext *dsdctx; ///< RefStruct reference
-    ThreadProgress *curr_progress, *prev_progress; ///< RefStruct references
-    FFRefStructPool *progress_pool; ///< RefStruct reference
     int dsd_channels;
 } WavpackContext;
 
@@ -993,14 +994,11 @@ static int wv_dsd_reset(WavpackContext *s, int channels)
 
     s->dsd_channels = 0;
     ff_refstruct_unref(&s->dsdctx);
-    ff_refstruct_unref(&s->curr_progress);
-    ff_refstruct_unref(&s->prev_progress);
 
     if (!channels)
         return 0;
 
-    if (WV_MAX_CHANNELS > SIZE_MAX / sizeof(*s->dsdctx) &&
-        channels > SIZE_MAX / sizeof(*s->dsdctx))
+    if (channels > INT_MAX / sizeof(*s->dsdctx))
         return AVERROR(EINVAL);
 
     s->dsdctx = ff_refstruct_allocz(channels * sizeof(*s->dsdctx));
@@ -1011,8 +1009,6 @@ static int wv_dsd_reset(WavpackContext *s, int channels)
     for (i = 0; i < channels; i++)
         memset(s->dsdctx[i].buf, 0x69, sizeof(s->dsdctx[i].buf));
 
-    ff_init_dsd_data();
-
     return 0;
 }
 
@@ -1021,30 +1017,21 @@ static int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
 {
     WavpackContext *fsrc = src->priv_data;
     WavpackContext *fdst = dst->priv_data;
+    int ret;
 
-    ff_refstruct_replace(&fdst->curr_progress, fsrc->curr_progress);
+    if (dst == src)
+        return 0;
+
+    ff_thread_release_ext_buffer(&fdst->curr_frame);
+    if (fsrc->curr_frame.f->data[0]) {
+        if ((ret = ff_thread_ref_frame(&fdst->curr_frame, &fsrc->curr_frame)) < 0)
+            return ret;
+    }
+
     ff_refstruct_replace(&fdst->dsdctx, fsrc->dsdctx);
     fdst->dsd_channels = fsrc->dsd_channels;
 
     return 0;
-}
-
-static av_cold int progress_pool_init_cb(FFRefStructOpaque opaque, void *obj)
-{
-    ThreadProgress *progress = obj;
-    return ff_thread_progress_init(progress, 1);
-}
-
-static void progress_pool_reset_cb(FFRefStructOpaque opaque, void *obj)
-{
-    ThreadProgress *progress = obj;
-    ff_thread_progress_reset(progress);
-}
-
-static av_cold void progress_pool_free_entry_cb(FFRefStructOpaque opaque, void *obj)
-{
-    ThreadProgress *progress = obj;
-    ff_thread_progress_destroy(progress);
 }
 #endif
 
@@ -1056,17 +1043,13 @@ static av_cold int wavpack_decode_init(AVCodecContext *avctx)
 
     s->fdec_num = 0;
 
-#if HAVE_THREADS
-    if (ff_thread_sync_ref(avctx, offsetof(WavpackContext, progress_pool)) == FF_THREAD_IS_FIRST_THREAD) {
-        s->progress_pool = ff_refstruct_pool_alloc_ext(sizeof(*s->curr_progress),
-                                                       FF_REFSTRUCT_POOL_FLAG_FREE_ON_INIT_ERROR, NULL,
-                                                       progress_pool_init_cb,
-                                                       progress_pool_reset_cb,
-                                                       progress_pool_free_entry_cb, NULL);
-        if (!s->progress_pool)
-            return AVERROR(ENOMEM);
-    }
-#endif
+    s->curr_frame.f = av_frame_alloc();
+    s->prev_frame.f = av_frame_alloc();
+
+    if (!s->curr_frame.f || !s->prev_frame.f)
+        return AVERROR(ENOMEM);
+
+    ff_init_dsd_data();
 
     return 0;
 }
@@ -1080,14 +1063,19 @@ static av_cold int wavpack_decode_end(AVCodecContext *avctx)
     av_freep(&s->fdec);
     s->fdec_num = 0;
 
-    ff_refstruct_pool_uninit(&s->progress_pool);
-    wv_dsd_reset(s, 0);
+    ff_thread_release_ext_buffer(&s->curr_frame);
+    av_frame_free(&s->curr_frame.f);
+
+    ff_thread_release_ext_buffer(&s->prev_frame);
+    av_frame_free(&s->prev_frame.f);
+
+    ff_refstruct_unref(&s->dsdctx);
 
     return 0;
 }
 
-static int wavpack_decode_block(AVCodecContext *avctx, AVFrame *frame, int block_no,
-                                const uint8_t *buf, int buf_size, int *new_progress)
+static int wavpack_decode_block(AVCodecContext *avctx, int block_no,
+                                const uint8_t *buf, int buf_size)
 {
     WavpackContext *wc = avctx->priv_data;
     WavpackFrameContext *s;
@@ -1418,13 +1406,13 @@ static int wavpack_decode_block(AVCodecContext *avctx, AVFrame *frame, int block
                 chmask = bytestream2_get_le32(&gb);
                 break;
             case 4:
-                bytestream2_get_byte(&gb);
+                size = bytestream2_get_byte(&gb);
                 chan  |= (bytestream2_get_byte(&gb) & 0xF) << 8;
                 chan  += 1;
                 chmask = bytestream2_get_le24(&gb);
                 break;
             case 5:
-                bytestream2_get_byte(&gb);
+                size = bytestream2_get_byte(&gb);
                 chan  |= (bytestream2_get_byte(&gb) & 0xF) << 8;
                 chan  += 1;
                 chmask = bytestream2_get_le32(&gb);
@@ -1433,7 +1421,6 @@ static int wavpack_decode_block(AVCodecContext *avctx, AVFrame *frame, int block
                 av_log(avctx, AV_LOG_ERROR, "Invalid channel info size %d\n",
                        size);
             }
-            av_assert1(chan <= WV_MAX_CHANNELS);
             break;
         case WP_ID_SAMPLE_RATE:
             if (size != 3) {
@@ -1525,43 +1512,36 @@ static int wavpack_decode_block(AVCodecContext *avctx, AVFrame *frame, int block
         } else {
             av_channel_layout_default(&new_ch_layout, s->stereo + 1);
         }
-        av_assert1(new_ch_layout.nb_channels <= WV_MAX_CHANNELS);
 
         /* clear DSD state if stream properties change */
-        if ((wc->dsdctx && !got_dsd) ||
-            got_dsd && (new_ch_layout.nb_channels != wc->dsd_channels ||
-                        av_channel_layout_compare(&new_ch_layout, &avctx->ch_layout) ||
-                        new_samplerate != avctx->sample_rate)) {
+        if (new_ch_layout.nb_channels != wc->dsd_channels ||
+            av_channel_layout_compare(&new_ch_layout, &avctx->ch_layout) ||
+            new_samplerate != avctx->sample_rate    ||
+            !!got_dsd      != !!wc->dsdctx) {
             ret = wv_dsd_reset(wc, got_dsd ? new_ch_layout.nb_channels : 0);
             if (ret < 0) {
                 av_log(avctx, AV_LOG_ERROR, "Error reinitializing the DSD context\n");
                 return ret;
             }
+            ff_thread_release_ext_buffer(&wc->curr_frame);
         }
         av_channel_layout_copy(&avctx->ch_layout, &new_ch_layout);
         avctx->sample_rate         = new_samplerate;
         avctx->sample_fmt          = sample_fmt;
         avctx->bits_per_raw_sample = orig_bpp;
 
+        ff_thread_release_ext_buffer(&wc->prev_frame);
+        FFSWAP(ThreadFrame, wc->curr_frame, wc->prev_frame);
+
         /* get output buffer */
-        frame->nb_samples = s->samples;
-        ret = ff_thread_get_buffer(avctx, frame, 0);
+        wc->curr_frame.f->nb_samples = s->samples;
+        ret = ff_thread_get_ext_buffer(avctx, &wc->curr_frame,
+                                       AV_GET_BUFFER_FLAG_REF);
         if (ret < 0)
             return ret;
 
-        av_assert1(!!wc->progress_pool == !!(avctx->active_thread_type & FF_THREAD_FRAME));
-        if (wc->progress_pool) {
-            if (wc->dsdctx) {
-                ff_refstruct_unref(&wc->prev_progress);
-                wc->prev_progress = ff_refstruct_pool_get(wc->progress_pool);
-                if (!wc->prev_progress)
-                    return AVERROR(ENOMEM);
-                FFSWAP(ThreadProgress*, wc->prev_progress, wc->curr_progress);
-                *new_progress = 1;
-            }
-            av_assert1(!!wc->dsdctx == !!wc->curr_progress);
-            ff_thread_finish_setup(avctx);
-        }
+        wc->frame = wc->curr_frame.f;
+        ff_thread_finish_setup(avctx);
     }
 
     if (wc->ch_offset + s->stereo >= avctx->ch_layout.nb_channels) {
@@ -1569,9 +1549,9 @@ static int wavpack_decode_block(AVCodecContext *avctx, AVFrame *frame, int block
         return ((avctx->err_recognition & AV_EF_EXPLODE) || !wc->ch_offset) ? AVERROR_INVALIDDATA : 0;
     }
 
-    samples_l = frame->extended_data[wc->ch_offset];
+    samples_l = wc->frame->extended_data[wc->ch_offset];
     if (s->stereo)
-        samples_r = frame->extended_data[wc->ch_offset + 1];
+        samples_r = wc->frame->extended_data[wc->ch_offset + 1];
 
     wc->ch_offset += 1 + s->stereo;
 
@@ -1623,27 +1603,26 @@ static int dsd_channel(AVCodecContext *avctx, void *frmptr, int jobnr, int threa
     const WavpackContext *s  = avctx->priv_data;
     AVFrame *frame = frmptr;
 
-    ff_dsd2pcm_translate(&s->dsdctx[jobnr], s->samples, 0,
+    ff_dsd2pcm_translate (&s->dsdctx [jobnr], s->samples, 0,
         (uint8_t *)frame->extended_data[jobnr], 4,
         (float *)frame->extended_data[jobnr], 1);
 
     return 0;
 }
 
-static int wavpack_decode_frame(AVCodecContext *avctx, AVFrame *frame,
+static int wavpack_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
                                 int *got_frame_ptr, AVPacket *avpkt)
 {
     WavpackContext *s  = avctx->priv_data;
     const uint8_t *buf = avpkt->data;
     int buf_size       = avpkt->size;
     int frame_size, ret, frame_flags;
-    int block = 0, new_progress = 0;
-
-    av_assert1(!s->curr_progress || s->dsdctx);
 
     if (avpkt->size <= WV_HEADER_SIZE)
         return AVERROR_INVALIDDATA;
 
+    s->frame     = NULL;
+    s->block     = 0;
     s->ch_offset = 0;
 
     /* determine number of samples */
@@ -1664,15 +1643,13 @@ static int wavpack_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         if (frame_size <= 0 || frame_size > buf_size) {
             av_log(avctx, AV_LOG_ERROR,
                    "Block %d has invalid size (size %d vs. %d bytes left)\n",
-                   block, frame_size, buf_size);
+                   s->block, frame_size, buf_size);
             ret = AVERROR_INVALIDDATA;
             goto error;
         }
-        ret = wavpack_decode_block(avctx, frame, block, buf,
-                                   frame_size, &new_progress);
-        if (ret < 0)
+        if ((ret = wavpack_decode_block(avctx, s->block, buf, frame_size)) < 0)
             goto error;
-        block++;
+        s->block++;
         buf      += frame_size;
         buf_size -= frame_size;
     }
@@ -1683,23 +1660,26 @@ static int wavpack_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         goto error;
     }
 
-    if (s->dsdctx) {
-        if (s->prev_progress)
-            ff_thread_progress_await(s->prev_progress, INT_MAX);
-        avctx->execute2(avctx, dsd_channel, frame, NULL, avctx->ch_layout.nb_channels);
-        if (s->curr_progress)
-            ff_thread_progress_report(s->curr_progress, INT_MAX);
-    }
+    ff_thread_await_progress(&s->prev_frame, INT_MAX, 0);
+    ff_thread_release_ext_buffer(&s->prev_frame);
+
+    if (s->modulation == MODULATION_DSD)
+        avctx->execute2(avctx, dsd_channel, s->frame, NULL, avctx->ch_layout.nb_channels);
+
+    ff_thread_report_progress(&s->curr_frame, INT_MAX, 0);
+
+    if ((ret = av_frame_ref(rframe, s->frame)) < 0)
+        return ret;
 
     *got_frame_ptr = 1;
 
     return avpkt->size;
 
 error:
-    if (new_progress) {
-        if (s->prev_progress)
-            ff_thread_progress_await(s->prev_progress, INT_MAX);
-        ff_thread_progress_report(s->curr_progress, INT_MAX);
+    if (s->frame) {
+        ff_thread_await_progress(&s->prev_frame, INT_MAX, 0);
+        ff_thread_release_ext_buffer(&s->prev_frame);
+        ff_thread_report_progress(&s->curr_frame, INT_MAX, 0);
     }
 
     return ret;
@@ -1718,5 +1698,6 @@ const FFCodec ff_wavpack_decoder = {
     UPDATE_THREAD_CONTEXT(update_thread_context),
     .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS |
                       AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_CHANNEL_CONF,
-    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
+                      FF_CODEC_CAP_ALLOCATE_PROGRESS,
 };

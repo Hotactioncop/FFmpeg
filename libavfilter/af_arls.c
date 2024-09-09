@@ -20,7 +20,6 @@
 
 #include "libavutil/common.h"
 #include "libavutil/float_dsp.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "audio.h"

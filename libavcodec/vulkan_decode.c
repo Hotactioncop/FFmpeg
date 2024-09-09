@@ -21,7 +21,6 @@
 #include "vulkan_decode.h"
 #include "config_components.h"
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 #include "libavutil/vulkan_loader.h"
 
 #if CONFIG_H264_VULKAN_HWACCEL

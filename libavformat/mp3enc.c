@@ -26,7 +26,6 @@
 #include "mux.h"
 #include "rawenc.h"
 #include "libavutil/avstring.h"
-#include "libavutil/mem.h"
 #include "libavcodec/mpegaudio.h"
 #include "libavcodec/mpegaudiodata.h"
 #include "libavcodec/mpegaudiodecheader.h"

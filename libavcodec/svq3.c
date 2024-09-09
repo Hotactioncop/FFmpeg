@@ -44,7 +44,6 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/crc.h"
-#include "libavutil/mem.h"
 #include "libavutil/mem_internal.h"
 
 #include "codec_internal.h"

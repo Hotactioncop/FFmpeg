@@ -26,7 +26,6 @@
 
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
@@ -36,6 +35,7 @@
 #include "bytestream.h"
 #include "lossless_videoencdsp.h"
 #include "put_bits.h"
+#include "mathops.h"
 #include "utvideo.h"
 #include "huffman.h"
 

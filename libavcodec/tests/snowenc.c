@@ -26,7 +26,6 @@
 
 #include "libavutil/lfg.h"
 #include "libavutil/mathematics.h"
-#include "libavutil/mem.h"
 
 int main(void){
 #define width  256

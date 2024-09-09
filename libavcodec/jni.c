@@ -84,13 +84,11 @@ void *av_jni_get_java_vm(void *log_ctx)
 int av_jni_set_android_app_ctx(void *app_ctx, void *log_ctx)
 {
 #if CONFIG_JNI
-    jobjectRefType type;
-
     JNIEnv *env = ff_jni_get_env(log_ctx);
     if (!env)
         return AVERROR(EINVAL);
 
-    type = (*env)->GetObjectRefType(env, app_ctx);
+    jobjectRefType type = (*env)->GetObjectRefType(env, app_ctx);
     if (type != JNIGlobalRefType) {
         av_log(log_ctx, AV_LOG_ERROR, "Application context must be passed as a global reference");
         return AVERROR(EINVAL);

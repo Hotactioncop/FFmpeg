@@ -22,8 +22,9 @@
 #include "config_components.h"
 
 #include "libavutil/avstring.h"
-#include "libavutil/mem.h"
+#include "libavutil/bprint.h"
 #include "libavutil/opt.h"
+#include "libavutil/thread.h"
 
 #include "avio_internal.h"
 #include "avformat.h"

@@ -20,7 +20,6 @@
 
 #include <mfxvideo.h>
 #include <mfxjpeg.h>
-#include <mfxvp8.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -30,16 +29,17 @@
 #include "libavutil/error.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_qsv.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/avassert.h"
-#include "libavutil/mem.h"
 
 #include "avcodec.h"
 #include "qsv_internal.h"
-#include "refstruct.h"
 
 #define MFX_IMPL_VIA_MASK(impl) (0x0f00 & (impl))
 #define QSV_HAVE_USER_PLUGIN    !QSV_ONEVPL
 #define QSV_HAVE_AUDIO          !QSV_ONEVPL
+
+#include "mfxvp8.h"
 
 #if QSV_HAVE_USER_PLUGIN
 #include <mfxplugin.h>
@@ -72,10 +72,6 @@ int ff_qsv_codec_id_to_mfx(enum AVCodecID codec_id)
 #if QSV_VERSION_ATLEAST(1, 34)
     case AV_CODEC_ID_AV1:
         return MFX_CODEC_AV1;
-#endif
-#if QSV_VERSION_ATLEAST(2, 11)
-    case AV_CODEC_ID_VVC:
-        return MFX_CODEC_VVC;
 #endif
 
     default:
@@ -745,19 +741,20 @@ int ff_qsv_init_internal_session(AVCodecContext *avctx, QSVSession *qs,
     return 0;
 }
 
-static void mids_buf_free(FFRefStructOpaque opaque, void *obj)
+static void mids_buf_free(void *opaque, uint8_t *data)
 {
-    AVBufferRef *hw_frames_ref = opaque.nc;
+    AVBufferRef *hw_frames_ref = opaque;
     av_buffer_unref(&hw_frames_ref);
+    av_freep(&data);
 }
 
-static QSVMid *qsv_create_mids(AVBufferRef *hw_frames_ref)
+static AVBufferRef *qsv_create_mids(AVBufferRef *hw_frames_ref)
 {
     AVHWFramesContext    *frames_ctx = (AVHWFramesContext*)hw_frames_ref->data;
     AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
     int                  nb_surfaces = frames_hwctx->nb_surfaces;
 
-    AVBufferRef *hw_frames_ref1;
+    AVBufferRef *mids_buf, *hw_frames_ref1;
     QSVMid *mids;
     int i;
 
@@ -765,10 +762,17 @@ static QSVMid *qsv_create_mids(AVBufferRef *hw_frames_ref)
     if (!hw_frames_ref1)
         return NULL;
 
-    mids = ff_refstruct_alloc_ext(nb_surfaces * sizeof(*mids), 0,
-                                  hw_frames_ref1, mids_buf_free);
+    mids = av_calloc(nb_surfaces, sizeof(*mids));
     if (!mids) {
         av_buffer_unref(&hw_frames_ref1);
+        return NULL;
+    }
+
+    mids_buf = av_buffer_create((uint8_t*)mids, nb_surfaces * sizeof(*mids),
+                                mids_buf_free, hw_frames_ref1, 0);
+    if (!mids_buf) {
+        av_buffer_unref(&hw_frames_ref1);
+        av_freep(&mids);
         return NULL;
     }
 
@@ -778,14 +782,15 @@ static QSVMid *qsv_create_mids(AVBufferRef *hw_frames_ref)
         mid->hw_frames_ref = hw_frames_ref1;
     }
 
-    return mids;
+    return mids_buf;
 }
 
 static int qsv_setup_mids(mfxFrameAllocResponse *resp, AVBufferRef *hw_frames_ref,
-                          QSVMid *mids)
+                          AVBufferRef *mids_buf)
 {
     AVHWFramesContext    *frames_ctx = (AVHWFramesContext*)hw_frames_ref->data;
     AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+    QSVMid                     *mids = (QSVMid*)mids_buf->data;
     int                  nb_surfaces = frames_hwctx->nb_surfaces;
     int i;
 
@@ -806,7 +811,12 @@ static int qsv_setup_mids(mfxFrameAllocResponse *resp, AVBufferRef *hw_frames_re
         return AVERROR(ENOMEM);
     }
 
-    resp->mids[resp->NumFrameActual + 1] = ff_refstruct_ref(mids);
+    resp->mids[resp->NumFrameActual + 1] = av_buffer_ref(mids_buf);
+    if (!resp->mids[resp->NumFrameActual + 1]) {
+        av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual]);
+        av_freep(&resp->mids);
+        return AVERROR(ENOMEM);
+    }
 
     return 0;
 }
@@ -829,16 +839,8 @@ static mfxStatus qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
         AVHWFramesContext *frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
         AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
         mfxFrameInfo      *i  = &req->Info;
-        mfxFrameInfo      *i1;
+        mfxFrameInfo      *i1 = &frames_hwctx->surfaces[0].Info;
 
-        if (!frames_hwctx->nb_surfaces) {
-            av_log(ctx->logctx, AV_LOG_DEBUG,
-                   "Dynamic frame pools, no frame is pre-allocated\n");
-
-            return MFX_ERR_NONE;
-        }
-
-        i1 = &frames_hwctx->surfaces[0].Info;
         if (i->Width  > i1->Width  || i->Height > i1->Height ||
             i->FourCC != i1->FourCC || i->ChromaFormat != i1->ChromaFormat) {
             av_log(ctx->logctx, AV_LOG_ERROR, "Mismatching surface properties in an "
@@ -848,7 +850,7 @@ static mfxStatus qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
             return MFX_ERR_UNSUPPORTED;
         }
 
-        ret = qsv_setup_mids(resp, ctx->hw_frames_ctx, ctx->mids);
+        ret = qsv_setup_mids(resp, ctx->hw_frames_ctx, ctx->mids_buf);
         if (ret < 0) {
             av_log(ctx->logctx, AV_LOG_ERROR,
                    "Error filling an external frame allocation request\n");
@@ -857,16 +859,11 @@ static mfxStatus qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
     } else if (req->Type & MFX_MEMTYPE_INTERNAL_FRAME) {
         /* internal frames -- allocate a new hw frames context */
         AVHWFramesContext *ext_frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
-        AVQSVFramesContext *ext_frames_hwctx = ext_frames_ctx->hwctx;
         mfxFrameInfo      *i  = &req->Info;
 
-        AVBufferRef *frames_ref;
-        QSVMid *mids;
+        AVBufferRef *frames_ref, *mids_buf;
         AVHWFramesContext *frames_ctx;
         AVQSVFramesContext *frames_hwctx;
-
-        if (!ext_frames_hwctx->nb_surfaces)
-            return MFX_ERR_UNSUPPORTED;
 
         frames_ref = av_hwframe_ctx_alloc(ext_frames_ctx->device_ref);
         if (!frames_ref)
@@ -892,14 +889,14 @@ static mfxStatus qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
             return MFX_ERR_MEMORY_ALLOC;
         }
 
-        mids = qsv_create_mids(frames_ref);
-        if (!mids) {
+        mids_buf = qsv_create_mids(frames_ref);
+        if (!mids_buf) {
             av_buffer_unref(&frames_ref);
             return MFX_ERR_MEMORY_ALLOC;
         }
 
-        ret = qsv_setup_mids(resp, frames_ref, mids);
-        ff_refstruct_unref(&mids);
+        ret = qsv_setup_mids(resp, frames_ref, mids_buf);
+        av_buffer_unref(&mids_buf);
         av_buffer_unref(&frames_ref);
         if (ret < 0) {
             av_log(ctx->logctx, AV_LOG_ERROR,
@@ -915,31 +912,19 @@ static mfxStatus qsv_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req,
 
 static mfxStatus qsv_frame_free(mfxHDL pthis, mfxFrameAllocResponse *resp)
 {
-    if (!resp->mids)
-        return MFX_ERR_NONE;
-
     av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual]);
-    ff_refstruct_unref(&resp->mids[resp->NumFrameActual + 1]);
+    av_buffer_unref((AVBufferRef**)&resp->mids[resp->NumFrameActual + 1]);
     av_freep(&resp->mids);
     return MFX_ERR_NONE;
 }
 
 static mfxStatus qsv_frame_lock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr)
 {
-    QSVFramesContext *ctx = (QSVFramesContext *)pthis;
-    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
-    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
-    QSVMid *qsv_mid;
-    AVHWFramesContext *hw_frames_ctx;
-    AVQSVFramesContext *hw_frames_hwctx;
+    QSVMid *qsv_mid = mid;
+    AVHWFramesContext *hw_frames_ctx = (AVHWFramesContext*)qsv_mid->hw_frames_ref->data;
+    AVQSVFramesContext *hw_frames_hwctx = hw_frames_ctx->hwctx;
     int ret;
 
-    if (!frames_hwctx->nb_surfaces)
-        return MFX_ERR_UNSUPPORTED;
-
-    qsv_mid = mid;
-    hw_frames_ctx = (AVHWFramesContext*)qsv_mid->hw_frames_ref->data;
-    hw_frames_hwctx = hw_frames_ctx->hwctx;
     if (qsv_mid->locked_frame)
         return MFX_ERR_UNDEFINED_BEHAVIOR;
 
@@ -992,15 +977,8 @@ fail:
 
 static mfxStatus qsv_frame_unlock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr)
 {
-    QSVFramesContext *ctx = (QSVFramesContext *)pthis;
-    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
-    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
-    QSVMid *qsv_mid;
+    QSVMid *qsv_mid = mid;
 
-    if (!frames_hwctx->nb_surfaces)
-        return MFX_ERR_UNSUPPORTED;
-
-    qsv_mid = mid;
     av_frame_free(&qsv_mid->locked_frame);
     av_frame_free(&qsv_mid->hw_frame);
 
@@ -1009,18 +987,9 @@ static mfxStatus qsv_frame_unlock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr)
 
 static mfxStatus qsv_frame_get_hdl(mfxHDL pthis, mfxMemId mid, mfxHDL *hdl)
 {
-    QSVFramesContext *ctx = (QSVFramesContext *)pthis;
-    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)ctx->hw_frames_ctx->data;
-    AVQSVFramesContext *frames_hwctx = frames_ctx->hwctx;
+    QSVMid *qsv_mid = (QSVMid*)mid;
     mfxHDLPair *pair_dst = (mfxHDLPair*)hdl;
-    mfxHDLPair *pair_src;
-
-    if (frames_hwctx->nb_surfaces) {
-        QSVMid *qsv_mid = (QSVMid*)mid;
-        pair_src = (mfxHDLPair*)qsv_mid->handle_pair;
-    } else {
-        pair_src = (mfxHDLPair*)mid;
-    }
+    mfxHDLPair *pair_src = (mfxHDLPair*)qsv_mid->handle_pair;
 
     pair_dst->first = pair_src->first;
 
@@ -1134,17 +1103,14 @@ int ff_qsv_init_session_frames(AVCodecContext *avctx, mfxSession *psession,
 
     if (!opaque) {
         qsv_frames_ctx->logctx = avctx;
-        qsv_frames_ctx->mids = NULL;
-        qsv_frames_ctx->nb_mids = 0;
 
         /* allocate the memory ids for the external frames */
-        if (frames_hwctx->nb_surfaces) {
-            ff_refstruct_unref(&qsv_frames_ctx->mids);
-            qsv_frames_ctx->mids = qsv_create_mids(qsv_frames_ctx->hw_frames_ctx);
-            if (!qsv_frames_ctx->mids)
-                return AVERROR(ENOMEM);
-            qsv_frames_ctx->nb_mids = frames_hwctx->nb_surfaces;
-        }
+        av_buffer_unref(&qsv_frames_ctx->mids_buf);
+        qsv_frames_ctx->mids_buf = qsv_create_mids(qsv_frames_ctx->hw_frames_ctx);
+        if (!qsv_frames_ctx->mids_buf)
+            return AVERROR(ENOMEM);
+        qsv_frames_ctx->mids    = (QSVMid*)qsv_frames_ctx->mids_buf->data;
+        qsv_frames_ctx->nb_mids = frames_hwctx->nb_surfaces;
 
         err = MFXVideoCORE_SetFrameAllocator(session, &frame_allocator);
         if (err != MFX_ERR_NONE)

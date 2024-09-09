@@ -27,7 +27,6 @@
 
 #include "libavutil/avstring.h"
 #include "libavutil/error.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavformat/avio.h"
 #include "video.h"

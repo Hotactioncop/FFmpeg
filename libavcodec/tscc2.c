@@ -26,7 +26,6 @@
 
 #include <inttypes.h>
 
-#include "libavutil/mem.h"
 #include "libavutil/thread.h"
 
 #define BITSTREAM_READER_LE

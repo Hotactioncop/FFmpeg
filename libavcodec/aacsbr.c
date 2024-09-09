@@ -43,6 +43,10 @@
 #include <float.h>
 #include <math.h>
 
+#if ARCH_MIPS
+#include "mips/aacsbr_mips.h"
+#endif /* ARCH_MIPS */
+
 /**
  * 2^(x) for integer x
  * @return correctly rounded float

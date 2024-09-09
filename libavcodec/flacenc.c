@@ -24,7 +24,6 @@
 #include "libavutil/crc.h"
 #include "libavutil/intmath.h"
 #include "libavutil/md5.h"
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "avcodec.h"
@@ -525,10 +524,11 @@ static void copy_samples(FlacEncodeContext *s, const void *samples)
 {
     int i, j, ch;
     FlacFrame *frame;
+    int shift = av_get_bytes_per_sample(s->avctx->sample_fmt) * 8 -
+                s->avctx->bits_per_raw_sample;
 
-#define COPY_SAMPLES(bits, shift0) do {                             \
+#define COPY_SAMPLES(bits) do {                                     \
     const int ## bits ## _t *samples0 = samples;                    \
-    const int shift = shift0;                                       \
     frame = &s->frame;                                              \
     for (i = 0, j = 0; i < frame->blocksize; i++)                   \
         for (ch = 0; ch < s->channels; ch++, j++)                   \
@@ -536,9 +536,9 @@ static void copy_samples(FlacEncodeContext *s, const void *samples)
 } while (0)
 
     if (s->avctx->sample_fmt == AV_SAMPLE_FMT_S16)
-        COPY_SAMPLES(16, 0);
+        COPY_SAMPLES(16);
     else
-        COPY_SAMPLES(32, 32 - s->avctx->bits_per_raw_sample);
+        COPY_SAMPLES(32);
 }
 
 

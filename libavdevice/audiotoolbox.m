@@ -28,7 +28,6 @@
 #import <AudioToolbox/AudioToolbox.h>
 #include <pthread.h>
 
-#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavformat/internal.h"
 #include "libavformat/mux.h"

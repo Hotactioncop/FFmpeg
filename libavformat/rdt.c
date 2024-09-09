@@ -27,7 +27,6 @@
 
 #include "avformat.h"
 #include "libavutil/avstring.h"
-#include "libavutil/mem.h"
 #include "demux.h"
 #include "rtpdec.h"
 #include "rdt.h"

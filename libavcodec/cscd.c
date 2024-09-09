@@ -22,7 +22,7 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "decode.h"
-#include "libavutil/mem.h"
+#include "libavutil/common.h"
 
 #if CONFIG_ZLIB
 #include <zlib.h>
