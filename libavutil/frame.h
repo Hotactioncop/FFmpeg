@@ -201,6 +201,12 @@ enum AVFrameSideDataType {
     AV_FRAME_DATA_DOVI_RPU_BUFFER,
 
     /**
+     * Dolby Vision RPU ITU T35 raw data, suitable for passing to SVT-AV1
+     * or other libraries. Array of uint8_t.
+     */
+    AV_FRAME_DATA_DOVI_RPU_BUFFER_T35,
+
+    /**
      * Parsed Dolby Vision metadata, suitable for passing to a software
      * implementation. The payload is the AVDOVIMetadata struct defined in
      * libavutil/dovi_meta.h.

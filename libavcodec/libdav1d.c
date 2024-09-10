@@ -562,6 +562,8 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
             break;
         }
         case ITU_T_T35_PROVIDER_CODE_DOLBY: {
+            AVBufferRef *rpu_buf;
+            AVFrameSideData *rpu;
             int provider_oriented_code = bytestream2_get_be32(&gb);
             if (itut_t35->country_code != ITU_T_T35_COUNTRY_CODE_US ||
                 provider_oriented_code != 0x800)
@@ -571,6 +573,18 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
             if (res < 0) {
                 av_log(c, AV_LOG_WARNING, "Error parsing DOVI OBU.\n");
                 break; // ignore
+            }
+
+            rpu_buf = av_buffer_alloc(itut_t35->payload_size);
+            if (rpu_buf) {
+                memcpy(rpu_buf->data, itut_t35->payload, itut_t35->payload_size);
+                rpu = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_DOVI_RPU_BUFFER_T35, rpu_buf);
+                if (!rpu) {
+                    av_buffer_unref(&rpu_buf);
+                    goto fail;
+                }
+            } else {
+                goto fail;
             }
 
             res = ff_dovi_attach_side_data(&dav1d->dovi, frame);
