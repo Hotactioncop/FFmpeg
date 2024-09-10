@@ -104,8 +104,6 @@ static const AVOption options[] = {
 
     { "log_to_dbg",     "Enable AMF logging to debug output",   OFFSET(log_to_dbg), AV_OPT_TYPE_BOOL,{.i64 = 0 }, 0, 1, VE },
 
-    { "smart_access_video",     "Enable Smart Access Video",                OFFSET(smart_access_video),             AV_OPT_TYPE_BOOL, {.i64 = -1  }, -1, 1, VE},
-
     //Pre Analysis options
     { "preanalysis",                            "Enable preanalysis",                                           OFFSET(preanalysis),                            AV_OPT_TYPE_BOOL,   {.i64 = -1 }, -1, 1, VE },
 
@@ -167,9 +165,7 @@ static av_cold int amf_encode_init_av1(AVCodecContext* avctx)
     AMFGuid             guid;
     AMFRate             framerate;
     AMFSize             framesize = AMFConstructSize(avctx->width, avctx->height);
-    amf_int64           color_depth;
-    amf_int64           color_profile;
-    enum                AVPixelFormat pix_fmt;
+
 
 
     if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
@@ -206,30 +202,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         profile = ctx->profile;
     }
     AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_PROFILE, profile);
-
-    /// Color profile
-    color_profile = ff_amf_get_color_profile(avctx);
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PROFILE, color_profile);
-
-    /// Color Depth
-    pix_fmt = avctx->hw_frames_ctx ? ((AVHWFramesContext*)avctx->hw_frames_ctx->data)->sw_format
-                                : avctx->pix_fmt;
-    color_depth = AMF_COLOR_BIT_DEPTH_8;
-    if (pix_fmt == AV_PIX_FMT_P010) {
-        color_depth = AMF_COLOR_BIT_DEPTH_10;
-    }
-
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_COLOR_BIT_DEPTH, color_depth);
-    AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PROFILE, color_profile);
-    if (color_depth == AMF_COLOR_BIT_DEPTH_8) {
-        /// Color Transfer Characteristics (AMF matches ISO/IEC)
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_TRANSFER_CHARACTERISTIC, AMF_COLOR_TRANSFER_CHARACTERISTIC_BT709);
-        /// Color Primaries (AMF matches ISO/IEC)
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PRIMARIES, AMF_COLOR_PRIMARIES_BT709);
-    } else {
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_TRANSFER_CHARACTERISTIC, AMF_COLOR_TRANSFER_CHARACTERISTIC_SMPTE2084);
-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_OUTPUT_COLOR_PRIMARIES, AMF_COLOR_PRIMARIES_BT2020);
-    }
 
     profile_level = avctx->level;
     if (profile_level == AV_LEVEL_UNKNOWN) {
@@ -268,22 +240,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
         else {
             ctx->rate_control_mode = AMF_VIDEO_ENCODER_AV1_RATE_CONTROL_METHOD_CBR;
             av_log(ctx, AV_LOG_DEBUG, "Rate control turned to CBR\n");
-        }
-    }
-
-    if (ctx->smart_access_video != -1) {
-        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_ENABLE_SMART_ACCESS_VIDEO, ctx->smart_access_video != 0);
-        if (res != AMF_OK) {
-            av_log(avctx, AV_LOG_ERROR, "The Smart Access Video is not supported by AMF.\n");
-            if (ctx->smart_access_video != 0)
-                return AVERROR(ENOSYS);
-        } else {
-            av_log(avctx, AV_LOG_INFO, "The Smart Access Video (%d) is set.\n", ctx->smart_access_video);
-            // Set low latency mode if Smart Access Video is enabled
-            if (ctx->smart_access_video != 0) {
-                AMF_ASSIGN_PROPERTY_BOOL(res, ctx->encoder, AMF_VIDEO_ENCODER_AV1_ENCODING_LATENCY_MODE, AMF_VIDEO_ENCODER_AV1_ENCODING_LATENCY_MODE_LOWEST_LATENCY);
-                av_log(avctx, AV_LOG_INFO, "The Smart Access Video set low latency mode.\n");
-            }
         }
     }
 

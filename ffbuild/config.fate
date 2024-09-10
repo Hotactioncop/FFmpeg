@@ -1,0 +1,1 @@
+config:x86:x86_64:generic:win64:Microsoft (R) C/C++ Optimizing Compiler Version 19.29.30154 for x64:--enable-amf --extra-cflags=-I./../../../../../AMF/ --target-os=win64 --arch=x86_64 --toolchain=msvc --disable-doc --disable-ffplay --disable-ffprobe --enable-debug=3 --disable-optimizations

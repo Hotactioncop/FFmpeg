@@ -28,7 +28,6 @@
 
 #include "movenc.h"
 #include "avformat.h"
-#include "avlanguage.h"
 #include "avio_internal.h"
 #include "dovi_isom.h"
 #include "riff.h"
@@ -3767,41 +3766,6 @@ static int mov_write_udta_sdp(AVIOContext *pb, MOVTrack *track)
     return len + 24;
 }
 
-static uint16_t language_code(const char *str)
-{
-    return (((str[0] - 0x60) & 0x1F) << 10) +
-           (((str[1] - 0x60) & 0x1F) <<  5) +
-           (( str[2] - 0x60) & 0x1F);
-}
-static int mov_write_3gp_udta_tag(AVIOContext *pb, AVDictionary *metadata,
-                                  const char *tag, const char *str)
-{
-    int64_t pos = avio_tell(pb);
-    AVDictionaryEntry *t = av_dict_get(metadata, str, NULL, 0);
-    if (!t || !utf8len(t->value))
-        return 0;
-    avio_wb32(pb, 0);   /* size */
-    ffio_wfourcc(pb, tag); /* type */
-    avio_wb32(pb, 0);   /* version + flags */
-    if (!strcmp(tag, "yrrc"))
-        avio_wb16(pb, atoi(t->value));
-    else {
-        int lang = 0, len;
-        len = strlen(t->key);
-        if (t->key[len - 4] == '-') {
-            lang = ff_mov_iso639_to_lang(&t->key[len - 3], 1);
-        }
-        if (!lang)
-            lang = ff_mov_iso639_to_lang("und", 1);
-        avio_wb16(pb, lang); /* language */
-        avio_write(pb, t->value, strlen(t->value) + 1); /* UTF8 string value */
-        if (!strcmp(tag, "albm") &&
-            (t = av_dict_get(metadata, "track", NULL, 0)))
-            avio_w8(pb, atoi(t->value));
-    }
-    return update_size(pb, pos);
-}
-
 static int mov_write_track_metadata(AVIOContext *pb, AVStream *st,
                                     const char *tag, const char *str)
 {
@@ -3876,23 +3840,8 @@ static int mov_write_track_udta_tag(AVIOContext *pb, MOVMuxContext *mov,
     if (ret < 0)
         return ret;
 
-    if (mov->mode & (MODE_MP4|MODE_MOV)) {
-        AVDictionaryEntry *t = NULL;
-        int und = 0;
-
+    if (mov->mode & (MODE_MP4|MODE_MOV))
         mov_write_track_metadata(pb_buf, st, "name", "title");
-        while ((t = av_dict_get(st->metadata, "title-", t, AV_DICT_IGNORE_SUFFIX))) {
-            int len = strlen(t->key);
-            if (len == 10 &&
-                ff_convert_lang_to(&t->key[len - 3], AV_LANG_ISO639_2_BIBL)) {
-                mov_write_3gp_udta_tag(pb_buf, st->metadata, "titl", t->key);
-                if (!strcmp("und", &t->key[len - 3]))
-                    und = 1;
-            }
-        }
-        if (!und)
-            mov_write_3gp_udta_tag(pb_buf, st->metadata, "titl", "title");
-    }
 
     if (mov->mode & MODE_MP4) {
         if ((ret = mov_write_track_kinds(pb_buf, st)) < 0)
@@ -4489,6 +4438,35 @@ static int ascii_to_wc(AVIOContext *pb, const uint8_t *b)
     return 0;
 }
 
+static uint16_t language_code(const char *str)
+{
+    return (((str[0] - 0x60) & 0x1F) << 10) +
+           (((str[1] - 0x60) & 0x1F) <<  5) +
+           (( str[2] - 0x60) & 0x1F);
+}
+
+static int mov_write_3gp_udta_tag(AVIOContext *pb, AVFormatContext *s,
+                                  const char *tag, const char *str)
+{
+    int64_t pos = avio_tell(pb);
+    AVDictionaryEntry *t = av_dict_get(s->metadata, str, NULL, 0);
+    if (!t || !utf8len(t->value))
+        return 0;
+    avio_wb32(pb, 0);   /* size */
+    ffio_wfourcc(pb, tag); /* type */
+    avio_wb32(pb, 0);   /* version + flags */
+    if (!strcmp(tag, "yrrc"))
+        avio_wb16(pb, atoi(t->value));
+    else {
+        avio_wb16(pb, language_code("eng")); /* language */
+        avio_write(pb, t->value, strlen(t->value) + 1); /* UTF8 string value */
+        if (!strcmp(tag, "albm") &&
+            (t = av_dict_get(s->metadata, "track", NULL, 0)))
+            avio_w8(pb, atoi(t->value));
+    }
+    return update_size(pb, pos);
+}
+
 static int mov_write_chpl_tag(AVIOContext *pb, AVFormatContext *s)
 {
     int64_t pos = avio_tell(pb);
@@ -4527,14 +4505,14 @@ static int mov_write_udta_tag(AVIOContext *pb, MOVMuxContext *mov,
         return ret;
 
     if (mov->mode & MODE_3GP) {
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "perf", "artist");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "titl", "title");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "auth", "author");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "gnre", "genre");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "dscp", "comment");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "albm", "album");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "cprt", "copyright");
-        mov_write_3gp_udta_tag(pb_buf, s->metadata, "yrrc", "date");
+        mov_write_3gp_udta_tag(pb_buf, s, "perf", "artist");
+        mov_write_3gp_udta_tag(pb_buf, s, "titl", "title");
+        mov_write_3gp_udta_tag(pb_buf, s, "auth", "author");
+        mov_write_3gp_udta_tag(pb_buf, s, "gnre", "genre");
+        mov_write_3gp_udta_tag(pb_buf, s, "dscp", "comment");
+        mov_write_3gp_udta_tag(pb_buf, s, "albm", "album");
+        mov_write_3gp_udta_tag(pb_buf, s, "cprt", "copyright");
+        mov_write_3gp_udta_tag(pb_buf, s, "yrrc", "date");
         mov_write_loci_tag(s, pb_buf);
     } else if (mov->mode == MODE_MOV && !(mov->flags & FF_MOV_FLAG_USE_MDTA)) { // the title field breaks gtkpod with mp4 and my suspicion is that stuff is not valid in mp4
         mov_write_string_metadata(s, pb_buf, "\251ART", "artist",      0);

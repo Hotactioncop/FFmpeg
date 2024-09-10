@@ -266,9 +266,6 @@ typedef struct MOVStreamContext {
         MOVEncryptionIndex *encryption_index;
     } cenc;
 
-    int has_fallback;   // Audio fallback track
-    int fallback;
-
     struct IAMFDemuxContext *iamf;
 } MOVStreamContext;
 

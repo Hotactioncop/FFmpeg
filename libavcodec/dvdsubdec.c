@@ -44,8 +44,6 @@ typedef struct DVDSubContext
   int      buf_size;
   int      forced_subs_only;
   uint8_t  used_color[256];
-  int64_t  pts;
-  int      output_empty_rects;
 } DVDSubContext;
 
 static void yuv_a_to_rgba(const uint8_t *ycbcr, const uint8_t *alpha, uint32_t *rgba, int num_values)
@@ -231,10 +229,7 @@ static int decode_dvd_subtitles(DVDSubContext *ctx, AVSubtitle *sub_header,
     uint32_t size;
     int64_t offset1, offset2;
 
-    if (buf_size < 2)
-        return AVERROR(EAGAIN);
-
-    if (buf_size == 2 && AV_RB16(buf) == 0)
+    if (buf_size < 10)
         return -1;
 
     if (AV_RB16(buf) == 0) {   /* HD subpicture with 4-byte offsets */
@@ -247,22 +242,15 @@ static int decode_dvd_subtitles(DVDSubContext *ctx, AVSubtitle *sub_header,
         cmd_pos = 2;
     }
 
-    if (big_offsets && buf_size < 6)
-        return AVERROR(EAGAIN);
-
     size = READ_OFFSET(buf + (big_offsets ? 2 : 0));
-
-    if (size == 0)
-        return -1;
-
-    if (buf_size < size)
-        return AVERROR(EAGAIN);
-
     cmd_pos = READ_OFFSET(buf + cmd_pos);
 
-    if (cmd_pos < 0 || cmd_pos > size) {
-        av_log(ctx, AV_LOG_ERROR, "Discarding invalid packet\n");
-        return AVERROR_INVALIDDATA;
+    if (cmd_pos < 0 || cmd_pos > buf_size - 2 - offset_size) {
+        if (cmd_pos > size) {
+            av_log(ctx, AV_LOG_ERROR, "Discarding invalid packet\n");
+            return 0;
+        }
+        return AVERROR(EAGAIN);
     }
 
     while (cmd_pos > 0 && cmd_pos < buf_size - 2 - offset_size) {
@@ -535,13 +523,10 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
     int appended = 0;
     int is_menu;
 
-    if (ctx->pts == AV_NOPTS_VALUE && sub->pts != AV_NOPTS_VALUE)
-        ctx->pts = sub->pts;
     if (ctx->buf_size) {
         int ret = append_to_cached_buf(avctx, buf, buf_size);
         if (ret < 0) {
             *data_size = 0;
-            ctx->pts = AV_NOPTS_VALUE;
             return ret;
         }
         buf = ctx->buf;
@@ -552,12 +537,7 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
     is_menu = decode_dvd_subtitles(ctx, sub, buf, buf_size);
     if (is_menu == AVERROR(EAGAIN)) {
         *data_size = 0;
-        int ret = appended ? 0 : append_to_cached_buf(avctx, buf, buf_size);
-        if (ret < 0) {
-            ctx->pts = AV_NOPTS_VALUE;
-            return ret;
-        }
-        return buf_size;
+        return appended ? 0 : append_to_cached_buf(avctx, buf, buf_size);
     }
 
     if (is_menu < 0) {
@@ -566,10 +546,9 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
         reset_rects(sub);
         *data_size = 0;
 
-        ctx->pts = AV_NOPTS_VALUE;
         return buf_size;
     }
-    if (!is_menu && !ctx->output_empty_rects && find_smallest_bounding_rectangle(ctx, sub) == 0)
+    if (!is_menu && find_smallest_bounding_rectangle(ctx, sub) == 0)
         goto no_subtitle;
 
     if (ctx->forced_subs_only && !(sub->rects[0]->flags & AV_SUBTITLE_FLAG_FORCED))
@@ -577,8 +556,6 @@ static int dvdsub_decode(AVCodecContext *avctx, AVSubtitle *sub,
 
     ctx->buf_size = 0;
     *data_size = 1;
-    sub->pts = ctx->pts;
-    ctx->pts = AV_NOPTS_VALUE;
     return buf_size;
 }
 
@@ -704,7 +681,6 @@ static av_cold int dvdsub_init(AVCodecContext *avctx)
             av_log(avctx, AV_LOG_DEBUG, " 0x%06"PRIx32, ctx->palette[i]);
         av_log(avctx, AV_LOG_DEBUG, "\n");
     }
-    ctx->pts = AV_NOPTS_VALUE;
 
     return 1;
 }
@@ -721,7 +697,6 @@ static const AVOption options[] = {
     { "palette", "set the global palette", OFFSET(palette_str), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, SD },
     { "ifo_palette", "obtain the global palette from .IFO file", OFFSET(ifo_str), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, SD },
     { "forced_subs_only", "Only show forced subtitles", OFFSET(forced_subs_only), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, SD},
-    { "output_empty_rects", "Output subtitles with empty or fully transparent rects", OFFSET(output_empty_rects), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, SD},
     { NULL }
 };
 static const AVClass dvdsub_class = {
